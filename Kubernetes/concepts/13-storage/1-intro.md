@@ -80,4 +80,4 @@ Today Kubernetes prefers this architecture:
 This is the standard production storage pattern.
 
 ### Summery:
-A CSI driver is required when the chosen storage integration is provided through CSI. Many modern external storage systems use CSI drivers, while Kubernetes also has built-in volume sources such as emptyDir, hostPath, local, and nfs that can be used without a CSI driver.
+A CSI driver is required when the chosen storage integration is provided through CSI. Many modern external storage systems use CSI drivers, while Kubernetes also has built-in volume sources such as `emptyDir`, `hostPath`, `local`, and `nfs` that can be used without a CSI driver.
