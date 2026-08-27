@@ -440,6 +440,264 @@ Expected result on a healthy fresh installation:
 > 0 loaded units listed.
 
 If failed units are present, investigate them before continuing.
+---
+
+## 4. System Preparation
+
+System preparation establishes a clean and up-to-date operating system before applying further hardening measures.
+
+---
+
+### 4.1 OS Updates
+
+Keeping the operating system updated is one of the most important basic security controls.
+
+Security vulnerabilities are regularly discovered in the kernel, system libraries, services, and other packages. Applying vendor-provided updates ensures that known vulnerabilities are patched before the server is placed into service.
+
+##### 4.1.1 Check Enabled Repositories
+
+Before updating the system, inspect the configured DNF repositories:
+
+```bash
+dnf repolist
+```
+Only repositories that are required and trusted should be enabled on the server.
+
+##### 4.1.2 Check for Available Updates
+
+Check whether updates are available:
+
+```bash
+dnf check-update
+```
+
+`dnf check-update` has an important behavior:
+
+- Exit code 0 — no updates are available.
+- Exit code 100 — updates are available.
+- Exit code 1 — an error occurred.
+
+#### 4.1.3 Review Update Information
+
+Review available security/update information:
+
+```bash
+dnf updateinfo summary
+```
+
+If detailed advisory information is required:
+
+```bash
+dnf updateinfo list
+```
+
+Security-related advisories should be given appropriate priority.
+
+#### 4.1.4 Apply Updates
+
+After reviewing the available updates, update the installed packages:
+
+```bash
+dnf upgrade
+```
+
+Alternatively:
+
+```bash
+dnf update
+```
+
+On modern DNF systems, `dnf upgrade` and `dnf update` are effectively equivalent for normal package updating.
+
+#### 4.1.5 Verify the Update
+
+After the update completes, verify the system:
+
+```bash
+dnf check-update
+```
+
+If no updates are available, the command should return exit code 0.
+
+Also verify the installed kernel:
+
+```bash
+uname -r
+```
+
+Check for packages that may require a reboot:
+
+```bash
+dnf needs-restarting
+```
+
+If the dnf needs-restarting command is not available, install/use the package that provides it only if needed.
+
+A reboot should be performed when the update process requires it, particularly when the running kernel or other critical system components have been replaced.
+
+#### 4.1.6 Reboot After Kernel Updates
+
+If a reboot is required, first check for failed systemd units:
+
+```bash
+systemctl --failed
+```
+
+Then reboot:
+
+```bash
+systemctl reboot
+```
+
+After the server comes back, verify:
+
+```bash
+uptime
+uname -r
+systemctl --failed
+```
+
+Also verify the critical services:
+
+```bash
+systemctl is-active NetworkManager
+systemctl is-active firewalld
+systemctl is-active sshd
+systemctl is-active auditd
+systemctl is-active chronyd
+```
+
+Verify network connectivity:
+
+```bash
+ip -br addr
+ip route
+```
+
+Verify listening services:
+
+```bash
+ss -tulnp
+```
+
+#### 4.1.7 Important Considerations
+Do not blindly update a production server
+
+Before applying updates to a production system, consider:
+
+- Whether the server is currently serving production traffic.
+- Whether a maintenance window is required.
+- Whether a backup or snapshot is available.
+- Whether a reboot is required.
+- Whether critical applications are compatible with the updated packages.
+- Whether the updated kernel has been tested when required.
+
+For a newly installed server that has not yet entered production, applying available updates before deploying workloads is generally preferable.
+
+Additional repositories increase the number of software sources that must be trusted and maintained. Only enable third-party repositories when there is a clear requirement for them.
+
+#### Kernel updates require special attention. 
+
+Installing a new kernel does not necessarily mean the currently running kernel changes immediately. The new kernel normally becomes active after reboot.
+
+#### Check:
+
+```bash
+rpm -q kernel
+uname -r
+```
+
+`rpm -q kernel` shows installed kernel packages, while `uname -r` shows the kernel currently running.
+
+These values can therefore differ after a kernel update until the system is rebooted.
+
+### 4.2 Hostname
+
+The default hostname on a fresh Rocky Linux installation is commonly `localhost` or `localhost.localdomain`. The hostname should describe the server's purpose and environment.
+
+#### 4.2.1 Check the Current Hostname
+
+Check the current hostname:
+
+```bash
+hostnamectl
+```
+
+Also check:
+
+```bash
+hostname
+hostname -f
+```
+
+> `hostname` simply shows the name currently assigned to your computer, while `hostname -f` looks up that name through `/etc/hosts` or DNS and shows the name the system resolves it to
+
+#### 4.2.2 Set the Static Hostname
+
+Set the hostname with hostnamectl:
+
+```bash
+hostnamectl set-hostname <hostname>
+```
+
+#### Example:
+
+```bash
+hostnamectl set-hostname prod-docker-01
+```
+
+Verify:
+
+```bash
+hostnamectl
+hostname
+```
+
+Also check the hostname file:
+
+```bash
+cat /etc/hostname
+```
+
+Expected:
+
+```
+<hostname>
+```
+
+#### 4.2.3 Check /etc/hosts
+
+Inspect the local hosts file:
+
+```bash
+cat /etc/hosts
+```
+
+The hostname should resolve appropriately according to the server's DNS and local hostname configuration.
+
+
+#### 4.2.4 Verify Hostname Resolution
+
+Check the hostname:
+
+```bash
+hostname
+hostname -f
+```
+
+If DNS is configured for the hostname, verify resolution:
+
+```bash
+getent hosts <hostname>
+```
+
+For an FQDN:
+
+```bash
+getent hosts <fqdn>
+```
+
+The hostname should resolve to the expected address where DNS resolution is intended.
 
 ---
 
