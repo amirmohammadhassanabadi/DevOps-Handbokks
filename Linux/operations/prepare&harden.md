@@ -701,6 +701,333 @@ The hostname should resolve to the expected address where DNS resolution is inte
 
 ---
 
+### 4.3 Time Synchronization
+
+Rocky Linux uses `chrony` for time synchronization.
+
+#### 4.3.1 Check Chrony
+
+Check whether `chronyd` is installed and running:
+
+```bash
+systemctl status chronyd --no-pager
+```
+
+Verify:
+
+```bash
+systemctl is-enabled chronyd
+systemctl is-active chronyd
+```
+
+### 4.3.2 Check Time Synchronization
+
+```bash
+timedatectl
+```
+
+Verify:
+
+```bash
+System clock synchronized: yes
+NTP service: active
+```
+
+### 4.3.3 Check Chrony Sources
+
+```bash
+chronyc sources -v
+```
+
+Check the current synchronization status:
+
+```bash
+chronyc tracking
+```
+
+The system should have a valid time source and should eventually report a synchronized clock.
+
+4.3.4 Configure Time Zone
+
+Check the current time zone:
+
+```bash
+timedatectl
+```
+
+List available time zones if necessary:
+
+```bash
+timedatectl list-timezones
+```
+
+Set the required time zone:
+
+```bash
+timedatectl set-timezone <TIMEZONE>
+```
+
+#### Example:
+
+```bash
+timedatectl set-timezone Europe/Madrid
+```
+
+---
+### 4.4 DNS / Network
+
+#### 4.4.1 Identify Network Interfaces
+
+```bash
+ip -br addr
+```
+
+Identify the primary network interface and verify that it is `UP`.
+
+#### 4.4.2 Check Routing
+
+```bash
+ip route
+```
+
+Verify that:
+
+- The expected network is present.
+- A correct default gateway exists.
+- The default route uses the expected interface.
+
+#### 4.4.3 Check NetworkManager
+
+Rocky Linux uses NetworkManager for network configuration.
+
+Check its status:
+
+```bash
+systemctl is-enabled NetworkManager
+systemctl is-active NetworkManager
+```
+List NetworkManager connections:
+
+```bash
+nmcli connection show
+```
+
+Show the active connection:
+
+```bash
+nmcli connection show --active
+```
+
+
+#### 4.4.4 Inspect IP Configuration
+
+```bash
+nmcli device show
+```
+
+#### 4.4.5 Test Network Connectivity
+
+Test connectivity to the default gateway:
+
+```bash
+ping -c 3 <gateway>
+```
+
+Test external IP connectivity:
+
+```bash
+ping -c 3 1.1.1.1
+```
+
+Test DNS resolution:
+
+```bash
+ping -c 3 example.com
+```
+
+#### 4.4.6 Inspect DNS Configuration
+
+Check the resolver configuration:
+
+```bash
+cat /etc/resolv.conf
+```
+
+Check DNS resolution through the system resolver:
+
+```bash
+getent hosts example.com
+```
+
+Check the configured DNS servers through NetworkManager:
+
+```bash
+nmcli device show | grep -E 'IP4.DNS|IP6.DNS'
+```
+
+Do not manually modify `/etc/resolv.conf` if it is managed by `NetworkManager`.
+
+#### 4.4.7 Configure DNS
+
+If DNS servers need to be changed, configure them through NetworkManager.
+
+Set DNS servers:
+
+```bash
+nmcli connection modify "<connection>" ipv4.dns "<DNS1> <DNS2>"
+```
+
+#### Example:
+
+```bash
+nmcli connection modify "System ens18" ipv4.dns "1.1.1.1 8.8.8.8"
+```
+
+Apply the configuration:
+
+```bash
+nmcli connection up "<connection>"
+```
+
+Verify:
+
+```bash
+nmcli device show | grep -E 'IP4.DNS|IP6.DNS'
+cat /etc/resolv.conf
+```
+
+#### 4.4.8 Hostname Resolution
+
+Verify the configured hostname:
+
+```bash
+hostname
+hostname -f
+```
+
+Test resolution:
+
+```bash
+getent hosts "$(hostname)"
+```
+
+If an FQDN is configured through DNS, verify it separately:
+
+```bash
+getent hosts <fqdn>
+```
+
+### 4.5 Package Management
+
+Rocky Linux uses DNF for package management.
+
+Proper package management helps maintain a consistent, updated, and trusted system.
+
+---
+
+#### 4.5.1 Check DNF
+
+Verify that DNF is available:
+
+```bash
+dnf --version
+```
+
+#### 4.5.2 Review Configured Repositories
+
+List enabled repositories:
+
+```bash
+dnf repolist
+```
+
+List all configured repositories:
+
+```bash
+dnf repolist --all
+```
+
+Review the repositories and disable repositories that are unnecessary or untrusted.
+
+#### 4.5.3 Review Repository Configuration
+
+Repository configuration files are normally located under:
+
+```bash
+/etc/yum.repos.d/
+```
+
+Inspect them:
+
+```bash
+ls -la /etc/yum.repos.d/
+```
+
+Do not modify repository files unless there is a specific requirement.
+
+#### 4.5.4 Verify Package Manager Health
+
+Check for package dependency problems:
+
+```bash
+dnf check
+```
+
+Clean expired or cached metadata when troubleshooting repository issues:
+
+```bash
+dnf clean all
+```
+
+Then rebuild metadata:
+
+```bash
+dnf makecache
+```
+
+Do not routinely run dnf clean all; use it when necessary.
+
+#### 4.5.5 Search for Packages
+
+Search for an available package:
+
+```bash
+dnf search <package>
+```
+
+Display package information:
+
+```bash
+dnf info <package>
+```
+
+List installed packages:
+
+```bash
+dnf list installed
+```
+
+Check whether a specific package is installed:
+
+```bash
+rpm -q <package>
+```
+
+#### 4.5.6 Package Security Principles
+
+Follow these principles:
+
+- Use Rocky Linux/RHEL-compatible trusted repositories.
+- Keep installed packages updated.
+- Avoid unnecessary third-party repositories.
+- Install only required software.
+- Review package transactions before confirming them.
+- Avoid downloading and installing random RPM files from the Internet.
+- Prefer DNF-managed packages so dependencies and updates can be managed consistently.
+
+---
+
+
 ```
 rocky-linux-server-hardening.md
 │
