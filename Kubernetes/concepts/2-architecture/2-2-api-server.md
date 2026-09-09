@@ -348,6 +348,36 @@ Controller                     API Server
     │◄──── ADDED Pod B ────────────│
     │◄──── DELETED Pod C ──────────│
 ```
+
+### Why Kubernetes WATCH Keeps the HTTP Connection Open
+
+The Kubernetes WATCH mechanism uses a long-lived HTTP connection between a client, such as a controller, and the kube-apiserver. The controller first establishes the connection by sending a WATCH request, such as requesting to watch Pods. The API server then keeps that HTTP request open and streams resource-change events back through the same connection whenever something changes.
+
+The important reason for keeping the connection open is not simply to prevent the controller from repeatedly asking for updates. The deeper reason is that **HTTP communication is normally client-initiated**. The controller is the HTTP client, while the kube-apiserver is the HTTP server. Therefore, the API server cannot normally initiate a new HTTP request to the controller when an event occurs. If Kubernetes wanted to do that, every controller would need to expose its own HTTP server so that the API server could connect to it. so the API server cannot normally decide to initiate an HTTP request to the controller, because the controller is an HTTP client, not an HTTP server. So if the API server wanted to "send a new HTTP request" when a Pod changed, the controller would need to expose an HTTP server for the API server to connect to.
+
+Instead, Kubernetes uses the existing WATCH connection as a communication channel for pushing events:
+
+```text
+Controller                         kube-apiserver
+    │                                      │
+    │────── HTTP WATCH request ───────────>│
+    │                                      │
+    │        connection remains open       │
+    │                                      │
+    │                         Pod changes  │
+    │<────── ADDED/MODIFIED/DELETED ───────│
+    │                                      │
+    │                      Another change  │
+    │<────── ADDED/MODIFIED/DELETED ───────│
+```
+
+This allows the API server to effectively **push events** to the controller without initiating new HTTP requests toward it. The controller establishes the communication channel once, and the API server continuously sends events through that channel.
+
+Therefore, the key idea is:
+
+> **The controller establishes the WATCH connection because HTTP is client-initiated; the API server keeps that connection open so it has a channel through which it can push resource-change events to the controller.**
+
+
 ---
 
 ## Informers
