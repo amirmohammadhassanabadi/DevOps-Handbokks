@@ -1,5 +1,3 @@
-
-
 ## cloud-controller-manager:
 
 The cloud-controller-manager (CCM) integrates Kubernetes with a cloud provider's APIs and manages cloud-specific functionality, such as:
