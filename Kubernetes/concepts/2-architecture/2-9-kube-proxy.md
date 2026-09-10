@@ -218,3 +218,257 @@ A more accurate statement is:
 The key idea is:
 
 > **kube-proxy watches the Kubernetes Service and endpoint state and programs the node's networking mechanisms so that traffic destined for a Service can reach and be distributed among its backend Pods.**
+
+---
+
+## iptables, IPVS, and nftables
+iptables, IPVS, and nftables are not Kubernetes components. They are Linux networking/packet-processing mechanisms that kube-proxy can use to implement Service traffic.
+
+### The common problem
+
+Suppose we have:
+
+```
+Service
+ClusterIP: 10.96.0.10:80
+
+Backend Pods:
+Pod A → 10.244.1.10:8080
+Pod B → 10.244.2.20:8080
+Pod C → 10.244.3.30:8080
+```
+
+A client sends:
+
+```
+10.96.0.10:80
+```
+
+But there isn't necessarily a real process listening on `10.96.0.10:80`. Something on the node needs to implement:
+
+```
+10.96.0.10:80
+       ↓
+choose backend
+       ↓
+10.244.1.10:8080
+```
+
+Historically, kube-proxy has done this using **iptables** or **IPVS**, and modern Kubernetes also has an **nftables** mode.
+       
+## iptables
+
+**iptables** is a Linux userspace tool used to configure the kernel's netfilter packet-processing framework.
+
+The important distinction is:
+
+- **iptables** = tool/interface used to configure rules
+- **netfilter** = kernel packet-processing framework
+
+The rules tell the Linux kernel what to do with packets.
+
+For example, conceptually:
+
+```
+Packet arrives
+ ↓
+destination = 10.96.0.10:80
+ ↓
+iptables/netfilter rules
+ ↓
+select backend
+ ↓
+DNAT
+ ↓
+10.244.1.10:8080
+```
+
+**DNAT** means Destination Network Address Translation.
+
+The destination address is changed from `10.96.0.10:80` to something like `10.244.1.10:8080`. The kernel then routes the packet toward that Pod.
+
+### How kube-proxy uses iptables
+
+kube-proxy watches Services and EndpointSlices.
+
+Suppose the Service has three endpoints:
+
+```
+Pod A → 10.244.1.10
+Pod B → 10.244.2.20
+Pod C → 10.244.3.30
+```
+
+kube-proxy creates a set of iptables rules representing that Service and its endpoints.
+
+Conceptually:
+
+```
+Service ClusterIP
+10.96.0.10:80
+       ↓
+   kube-proxy
+       ↓
+iptables rules
+       ↓
+ ┌─────┼─────┐
+ ↓     ↓     ↓
+Pod A Pod B Pod C
+```
+
+The actual iptables configuration is considerably more complicated than this; kube-proxy uses chains and rules to implement Service and endpoint selection.
+
+**Important point:**
+
+```
+kube-proxy isn't sitting in the packet path like Nginx:
+
+❌ Packet → kube-proxy process → Pod
+```
+
+Instead:
+```
+✅ kube-proxy → programs kernel networking rules
+
+Packet → Linux kernel/netfilter → Pod
+```
+
+## IPVS
+
+**IPVS** stands for IP Virtual Server. It is a Linux kernel-based Layer 4 load-balancing mechanism.
+
+Instead of representing Service load balancing primarily through large numbers of individual iptables rules, IPVS maintains virtual services and real servers.
+
+**For example:**
+
+```
+Virtual Service
+10.96.0.10:80
+       │
+       ├── 10.244.1.10:8080
+       ├── 10.244.2.20:8080
+       └── 10.244.3.30:8080
+```
+
+Here:
+
+- **Virtual Service** = Kubernetes Service ClusterIP:port
+- **Real Servers** = Service endpoints / Pod IPs
+
+When a packet arrives for `10.96.0.10:80`, IPVS selects one of the backend destinations according to its configured scheduling algorithm.
+
+For example:
+
+```
+Request 1 → Pod A
+Request 2 → Pod B
+Request 3 → Pod C
+Request 4 → Pod A
+...
+```
+
+IPVS supports different load-balancing algorithms, such as:
+
+- round-robin
+- least connections
+- weighted variants
+- others
+
+### Why was IPVS attractive?
+
+One of the historical motivations was **scaling**. With very large numbers of Services and endpoints, representing everything as huge numbers of iptables rules could become expensive to process and manage.
+
+IPVS provides a more purpose-built kernel load-balancing mechanism.
+
+However, there is an important modern point:
+
+> IPVS is no longer automatically considered the "better/newer" choice. Kubernetes has introduced nftables mode, and current Kubernetes networking discussions generally shouldn't be reduced to "iptables is old, IPVS is better."
+
+## nftables
+
+**nftables** is the newer Linux packet-filtering framework intended to replace the traditional iptables framework.
+
+Conceptually:
+
+- **iptables** → older interface/ecosystem
+- **nftables** → newer Linux packet-filtering framework
+
+nftables also operates through the Linux kernel's packet-processing infrastructure.
+
+Kubernetes has a nftables mode for kube-proxy, where kube-proxy programs nftables rules to implement Services.
+
+The basic flow remains:
+
+```
+Service state
+     ↓
+kube-proxy
+     ↓
+nftables rules
+     ↓
+Linux kernel
+     ↓
+backend Pod
+```
+
+So nftables isn't fundamentally changing the Kubernetes Service abstraction. You still have:
+
+```
+Service
+   ↓
+ClusterIP
+   ↓
+backend endpoints
+```
+
+The difference is how the node implements that behavior.
+
+The most important distinction is:
+
+```
+              Kubernetes
+                  │
+              kube-proxy
+                  │
+    ┌─────────────┼─────────────┐
+    ↓             ↓             ↓
+iptables         IPVS        nftables
+    │             │             │
+    └─────────────┼─────────────┘
+                  ↓
+             Linux kernel
+                  ↓
+              Pod traffic
+```
+
+## where does eBPF fit?
+
+This is worth knowing because you'll encounter it later with **Cilium**.
+
+Some Kubernetes networking implementations don't rely on kube-proxy at all.
+
+**For example:**
+
+**Traditional:**
+
+```
+Service
+   ↓
+kube-proxy
+   ↓
+iptables/IPVS/nftables
+   ↓
+Pod
+```
+
+**eBPF-based:**
+
+```
+Service
+   ↓
+eBPF-based networking
+   ↓
+Linux kernel
+   ↓
+Pod
+```
