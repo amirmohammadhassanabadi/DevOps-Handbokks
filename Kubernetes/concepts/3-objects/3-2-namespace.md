@@ -284,3 +284,238 @@ More specific access, resource, and network isolation
 ```
 
 Namespaces do not create separate Kubernetes clusters. They provide a logical partition within one cluster, while cluster-scoped resources remain outside individual namespaces.
+
+---
+
+## Namespace Troubleshooting Workflow
+
+When troubleshooting a namespace, first determine its current state and then inspect the resources and control-plane conditions associated with it.
+
+### 1. Check the Namespace Status
+
+Start by checking whether the namespace exists and its current status:
+
+```bash
+kubectl get namespace dev
+```
+
+For more details:
+
+```bash
+kubectl describe namespace dev
+```
+
+Normally, a namespace should have a status such as:
+
+```text
+Active
+```
+
+If it is being deleted, its status will typically be:
+
+```text
+Terminating
+```
+
+### 2. Check Namespace Events
+
+Inspect events associated with the namespace:
+
+```bash
+kubectl get events -n dev --sort-by=.lastTimestamp
+```
+
+Events and conditions can provide clues about failed cleanup, admission problems, unavailable APIs, or other issues.
+
+### 3. Check for Remaining Resources
+
+When a namespace is stuck in `Terminating`, determine whether resources still exist inside it.
+
+A useful first check is:
+
+```bash
+kubectl get all -n dev
+```
+
+However, `get all` does not include every resource type. To discover all namespaced resource types supported by the cluster:
+
+```bash
+kubectl api-resources --verbs=list --namespaced -o name
+```
+
+You can then query those resources:
+
+```bash
+for resource in $(kubectl api-resources --verbs=list --namespaced -o name); do
+    kubectl get "$resource" -n dev --ignore-not-found
+done
+```
+
+This can reveal resources that are not shown by `kubectl get all`, such as ConfigMaps, Secrets, PVCs, or custom resources.
+
+### 4. Check for Finalizers
+
+If resources remain or the namespace cannot complete deletion, inspect finalizers.
+
+For the namespace:
+
+```bash
+kubectl get namespace dev -o yaml
+```
+
+Look for:
+
+```yaml
+spec:
+  finalizers:
+```
+
+Finalizers are mechanisms that prevent an object from being deleted until a required cleanup operation has been completed.
+
+Resources inside the namespace can also have finalizers:
+
+```bash
+kubectl get <resource> <name> -n dev -o yaml
+```
+
+Check for:
+
+```yaml
+metadata:
+  finalizers:
+```
+
+A namespace may remain in `Terminating` when Kubernetes is unable to complete the cleanup associated with a finalizer.
+
+### 5. Check for Unavailable API Resources
+
+Namespace deletion requires Kubernetes to discover and process the resources belonging to that namespace.
+
+Check the API resources available in the cluster:
+
+```bash
+kubectl api-resources
+```
+
+If a CRD or aggregated API service is unavailable, Kubernetes may be unable to successfully enumerate resources during namespace cleanup.
+
+For custom resources, check the corresponding CRDs:
+
+```bash
+kubectl get crd
+```
+
+And check their status:
+
+```bash
+kubectl describe crd <crd-name>
+```
+
+For aggregated APIs, inspect:
+
+```bash
+kubectl get apiservice
+```
+
+Look for services whose `AVAILABLE` status is `False`.
+
+### 6. Check the Namespace Controller
+
+Namespace lifecycle management is handled by the **kube-controller-manager**.
+
+If the namespace remains stuck despite the resources and API services appearing healthy, inspect the controller-manager logs.
+
+For a kubeadm-style control plane where the controller-manager runs as a static Pod:
+
+```bash
+kubectl get pods -n kube-system
+```
+
+Then inspect its logs:
+
+```bash
+kubectl logs -n kube-system <kube-controller-manager-pod>
+```
+
+The exact method depends on how the control plane is deployed.
+
+### 7. Remove a Problematic Finalizer Only When Necessary
+
+Do **not** immediately remove finalizers just to force deletion.
+
+First determine:
+
+1. Which object has the finalizer.
+2. Why the finalizer was added.
+3. Which cleanup operation it is waiting for.
+4. Why that cleanup operation cannot complete.
+
+If the responsible controller is permanently unavailable or the cleanup is no longer required, removing the finalizer may be appropriate.
+
+For example, a resource's finalizers can be inspected with:
+
+```bash
+kubectl get <resource> <name> -n dev -o json
+```
+
+If you have confirmed that the finalizer is stale and safe to remove, it can be patched:
+
+```bash
+kubectl patch <resource> <name> -n dev \
+  --type=json \
+  -p='[{"op":"remove","path":"/metadata/finalizers"}]'
+```
+
+The exact operation depends on the resource and its finalizer structure.
+
+### 8. Verify Deletion
+
+After resolving the underlying problem, check the namespace again:
+
+```bash
+kubectl get namespace dev
+```
+
+Then verify that the namespace and its namespaced resources are gone:
+
+```bash
+kubectl get namespaces
+```
+
+If necessary, check whether objects from the namespace are still discoverable.
+
+### Namespace `Terminating` Troubleshooting Flow
+
+The overall workflow can be summarized as:
+
+```text
+Namespace stuck in Terminating
+            │
+            ▼
+     Check namespace status
+            │
+            ▼
+     Check events/conditions
+            │
+            ▼
+   Check remaining resources
+            │
+            ▼
+     Check for finalizers
+            │
+            ▼
+ Check CRDs / APIService health
+            │
+            ▼
+ Check kube-controller-manager
+            │
+            ▼
+     Fix underlying issue
+            │
+            ▼
+      Verify deletion
+```
+
+Only when the underlying cleanup mechanism is understood and the finalizer is confirmed to be stale should manually removing a finalizer be considered.
+
+**Important:** Force-removing namespace finalizers can leave resources or external infrastructure behind. It should therefore be treated as a recovery procedure, not the normal method for deleting a namespace.
