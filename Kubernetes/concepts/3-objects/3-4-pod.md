@@ -462,3 +462,725 @@ An Init Container is different from a **sidecar container**.
 * **Sidecar Container** → normally runs alongside the main application container and provides supporting functionality.
 
 This distinction is important when designing multi-container Pods.
+
+---
+
+## Pod Lifecycle
+
+The **Pod lifecycle** describes how a Pod progresses from creation through execution and eventually termination.
+
+Several Kubernetes components participate in this lifecycle:
+
+* **kube-apiserver** → accepts and exposes the Pod object
+* **etcd** → stores the persistent API state
+* **kube-scheduler** → assigns an unscheduled Pod to a node
+* **kubelet** → manages the Pod and its containers on the assigned node
+* **Controllers** → create, replace, or delete Pods when they are managed by higher-level workloads such as Deployments
+
+A simplified lifecycle is:
+
+```text
+Pod manifest
+    ↓
+kube-apiserver
+    ↓
+Pod object stored in etcd
+    ↓
+Scheduler selects a node
+    ↓
+kubelet receives the Pod assignment
+    ↓
+Images pulled / containers created
+    ↓
+Containers started
+    ↓
+Pod runs
+    ↓
+Pod terminates
+```
+
+Once a Pod is scheduled, it is **bound to that node**. Kubernetes does not move the existing Pod to another node if the node fails. Instead, when the Pod is managed by a controller such as a Deployment, the controller can create a **new replacement Pod**, which the scheduler may assign to another node.
+
+---
+
+# Pod Phases
+
+Kubernetes reports a Pod's high-level lifecycle state through `.status.phase`.
+
+The possible Pod phases are:
+
+* **`Pending`**
+* **`Running`**
+* **`Succeeded`**
+* **`Failed`**
+* **`Unknown`**
+
+Pod phase is a **high-level summary**, not a detailed state machine. For detailed troubleshooting, inspect container states, container termination reasons, Pod conditions, and Events.
+
+- ## Pending
+
+    A Pod is in `Pending` when it has been accepted by Kubernetes but has not yet reached the `Running` or terminal phases.
+
+    This can include:
+
+    * Waiting for scheduling
+    * Waiting for required resources
+    * Waiting for volumes
+    * Pulling container images
+    * Preparing containers
+
+    Therefore, a Pending Pod may already be scheduled to a node.
+
+    ### Common causes
+
+    * No node has sufficient CPU or memory
+    * Node selectors or affinity rules prevent scheduling
+    * Node taints are not tolerated
+    * Required PersistentVolume/PVC is unavailable
+    * Image is still being pulled
+    * Other admission or initialization requirements prevent startup
+
+    ### Key insight
+
+    > `Pending` indicates that the Pod has not reached the Running phase. It does not necessarily mean that scheduling has failed.
+
+    To determine the actual cause:
+
+    ```bash
+    kubectl describe pod <pod-name>
+    ```
+
+    The **Events** section is usually the first place to look.
+
+    ---
+
+- ## Running
+
+    A Pod enters `Running` when:
+
+    * It has been bound to a node, and
+    * All containers have been created, and
+    * At least one container is running or is in the process of starting/restarting
+
+    `Running` does **not** necessarily mean that the application is healthy or ready to receive traffic.
+
+    For example, a Pod can be:
+
+    ```text
+    Phase: Running
+    Ready: False
+    ```
+
+    This can happen when a readiness probe is failing.
+
+    ---
+
+- ## Succeeded
+
+    A Pod enters `Succeeded` when **all containers have terminated successfully** and Kubernetes will not restart them.
+
+    This is common for short-lived workloads such as:
+
+    * Batch processing
+    * Data migration
+    * One-time scripts
+    * Kubernetes Jobs
+
+    Example:
+
+    ```text
+    Job
+     ↓
+    Pod
+     ↓
+    Container completes successfully
+     ↓
+    Pod → Succeeded
+    ```
+
+    ---
+
+- ## Failed
+
+    A Pod enters `Failed` when **all containers have terminated**, and at least one container terminated unsuccessfully or was terminated by the system.
+
+    For example:
+
+    ```text
+    Container → exit code 1
+                     ↓
+    Pod → Failed
+    ```
+
+    The exact reason should be determined from the container's termination state and Pod Events.
+
+    ---
+
+- ## Unknown
+
+    `Unknown` means Kubernetes cannot reliably determine the current state of the Pod.
+
+    This commonly occurs when communication with the node is unavailable.
+
+    Possible causes include:
+
+    * Node failure
+    * Network partition
+    * Kubelet failure
+    * Node shutdown
+
+    This is generally a **node/control-plane communication problem**, rather than an application-level failure.
+
+---
+
+# Pod Phase vs Container State vs Pod Conditions
+
+These three concepts should not be confused.
+
+```text
+Pod
+│
+├── Phase
+│     └── High-level Pod lifecycle
+│
+├── Conditions
+│     └── More detailed Pod status
+│
+└── Containers
+      └── Individual container states
+```
+
+- ### Pod Phase
+
+    Answers:
+
+    > **What is the overall high-level lifecycle state of the Pod?**
+
+    Examples:
+
+    ```text
+    Pending
+    Running
+    Succeeded
+    Failed
+    Unknown
+    ```
+
+- ### Container State
+
+    Answers:
+
+    > **What is happening with an individual container?**
+
+    The three container states are:
+
+    * `Waiting`
+    * `Running`
+    * `Terminated`
+
+- ### Pod Conditions
+
+    Answers:
+
+    > **Has a particular condition of the Pod been satisfied?**
+
+    Pod Phase vs Pod Condition — Simple Difference
+
+    The easiest way to understand it is:
+
+    - **Phase** = What is the overall lifecycle state of the Pod?
+    - **Condition** = Is a specific thing about the Pod currently true?
+    
+    For example, while a Pod is Running:
+
+    ```
+    PodScheduled    = True
+    Initialized     = True
+    ContainersReady = True
+    Ready           = True
+    ```
+
+    But you could have:
+
+    ```
+    Phase = Running
+
+    PodScheduled    = True
+    Initialized     = True
+    ContainersReady = False
+    Ready           = False
+    ```
+
+    **Meaning:**
+
+    The Pod is running, but its containers aren't ready, so the Pod isn't ready to receive traffic.
+
+    So they answer different questions:
+
+    | | Pod Phase | Pod Condition |
+    | --- | --- | --- |
+    | Question | What is the Pod's overall lifecycle state? | Is a specific condition currently satisfied? |
+    | Example | Running | Ready=True |
+    | Number | One phase | Multiple conditions
+    | Detail | High-level | More specific |
+    | Example | Succeeded | Ready=False |
+
+    **The easiest mental model:**
+    ```
+    Pod
+    │
+    ├── Phase
+    │     └── Running
+    │
+    └── Conditions
+          ├── PodScheduled = True
+          ├── Initialized = True
+          ├── ContainersReady = False
+          └── Ready = False
+    ```
+
+    Phase tells you the big picture. Conditions tell you the details and one particularly important point:
+
+    > **Running does NOT mean Ready.**
+
+
+
+
+
+
+
+---
+
+# Container States
+
+Each container inside a Pod has its own state.
+
+## Waiting
+
+The container has not yet started running.
+
+The container may be waiting because:
+
+* Its image is being pulled
+* Container configuration is invalid
+* A previous attempt failed
+* Another initialization step has not completed
+
+The state may include a `reason`, such as:
+
+```text
+ContainerCreating
+ErrImagePull
+ImagePullBackOff
+CrashLoopBackOff
+CreateContainerConfigError
+```
+
+These are **container state reasons**, not Pod phases.
+
+---
+
+## Running
+
+The container has been started and its process is currently executing.
+
+The state can include information such as:
+
+* Start time
+* Container ID
+
+A Running container does not automatically mean the application is healthy or ready.
+
+---
+
+## Terminated
+
+The container has finished execution.
+
+Termination information can include:
+
+* Exit code
+* Reason
+* Start time
+* Finish time
+* Termination message
+
+A container can terminate:
+
+```text
+Successfully → exit code 0
+Unsuccessfully → non-zero exit code
+```
+
+Depending on the Pod's restart policy and workload configuration, Kubernetes may restart the container.
+
+---
+
+# Pod Conditions
+
+Pod conditions provide more detailed information about important lifecycle conditions.
+
+Common conditions include:
+
+| Condition         | Meaning                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `PodScheduled`    | Pod has been successfully assigned to a node                     |
+| `Initialized`     | All Init Containers have completed successfully                  |
+| `ContainersReady` | All containers in the Pod are ready                              |
+| `Ready`           | Pod is ready to receive traffic according to its readiness state |
+
+Each condition can have one of three values:
+
+```text
+True
+False
+Unknown
+```
+
+For example:
+
+```text
+PodScheduled    → True
+Initialized     → True
+ContainersReady → False
+Ready           → False
+```
+
+This could mean the Pod has been successfully scheduled and initialized, but one or more application containers are not currently ready.
+
+### Important: Ready vs Running
+
+A Pod can be:
+
+```text
+Phase: Running
+Ready: False
+```
+
+This is normal when the application is running but its readiness probe is failing.
+
+A **readiness probe does not restart the container**. It determines whether the Pod should be considered ready to receive traffic.
+
+A **liveness probe**, when it fails according to its configuration, can cause the kubelet to restart the affected container.
+
+---
+
+# Common Pod Startup and Container Errors
+
+The following statuses are frequently seen when troubleshooting Pods with:
+
+```bash
+kubectl get pods
+```
+
+They are **not Pod phases**. They generally represent container states or reasons associated with failed startup/restarts.
+
+## ErrImagePull
+
+`ErrImagePull` indicates that the kubelet attempted to pull the container image but the pull failed.
+
+Common causes:
+
+* Incorrect image name
+* Incorrect image tag
+* Image does not exist
+* Authentication failure
+* Registry unavailable
+* DNS/network problems
+
+Example:
+
+```text
+Pod
+ ↓
+kubelet
+ ↓
+Container runtime
+ ↓
+Image registry
+       ✕
+   image pull failed
+```
+
+---
+
+## ImagePullBackOff
+
+`ImagePullBackOff` occurs when image pulling continues to fail.
+
+Kubernetes applies a **backoff delay** between retry attempts instead of continuously retrying immediately.
+
+Typical sequence:
+
+```text
+Image pull
+    ↓
+Failure
+    ↓
+ErrImagePull
+    ↓
+Retry
+    ↓
+Failure
+    ↓
+ImagePullBackOff
+    ↓
+Retry after backoff
+```
+
+### Key distinction
+
+- **`ErrImagePull`** = image pull attempt failed
+- **`ImagePullBackOff`** = repeated image pull failures with increasing retry delay
+
+---
+
+## CreateContainerConfigError
+
+This indicates that Kubernetes could not create the container because required configuration could not be resolved or validated.
+
+Common causes include:
+
+* Referencing a non-existent ConfigMap
+* Referencing a non-existent Secret
+* Invalid environment configuration
+* Invalid volume configuration
+* Other invalid container configuration
+
+The first troubleshooting command should generally be:
+
+```bash
+kubectl describe pod <pod-name>
+```
+
+Then inspect the **Events** section.
+
+---
+
+## CreateContainerError
+
+This indicates that Kubernetes attempted to create the container, but container creation failed.
+
+Possible causes include:
+
+* Invalid container configuration
+* Volume-related problems
+* Runtime errors
+* Filesystem or permission problems
+* Other container-creation failures
+
+The exact cause should be determined from the Events and container status.
+
+---
+
+## CrashLoopBackOff
+
+`CrashLoopBackOff` indicates that a container repeatedly starts and then terminates, causing Kubernetes to repeatedly restart it with an increasing delay between attempts.
+
+Typical sequence:
+
+```text
+Container starts
+      ↓
+Application exits/crashes
+      ↓
+Kubelet restarts container
+      ↓
+Application crashes again
+      ↓
+Restart delay increases
+      ↓
+CrashLoopBackOff
+```
+
+Common causes:
+
+* Application crashes
+* Missing configuration
+* Missing environment variables
+* Incorrect command or entrypoint
+* Dependency failures
+* Application exits immediately
+* Liveness/startup probe causing repeated restarts
+
+### Important distinction
+
+A **readiness probe failure alone does not cause `CrashLoopBackOff`**, because readiness probes do not restart containers.
+
+---
+
+## OOMKilled
+
+`OOMKilled` indicates that a container was terminated after the Linux kernel's out-of-memory mechanism killed it.
+
+A common cause is the container exceeding its configured memory limit.
+
+For example:
+
+```text
+Container memory usage
+        ↑
+        │
+Memory limit
+────────┼────────
+        │
+        ✕
+     OOMKilled
+```
+
+Common causes:
+
+* Application consumes too much memory
+* Memory limit is too low
+* Memory leak
+* Unexpected workload spike
+
+The container's previous termination reason can usually be inspected with:
+
+```bash
+kubectl describe pod <pod-name>
+```
+
+or:
+
+```bash
+kubectl get pod <pod-name> -o jsonpath='{.status.containerStatuses[*].lastState.terminated.reason}'
+```
+
+---
+
+## ContainerCannotRun
+
+This indicates that the container runtime could not successfully start the container's process.
+
+Possible causes include:
+
+* Invalid executable or command
+* Executable does not exist
+* Permission problems
+* Incompatible image/architecture
+* Runtime or filesystem problems
+
+The exact error returned by the runtime is important when troubleshooting this condition.
+
+---
+
+## RunContainerError
+
+This indicates that an error occurred while the container runtime was attempting to start or initialize the container.
+
+The exact meaning can vary depending on the underlying runtime and error.
+
+Possible causes include:
+
+* Startup command problems
+* Runtime configuration problems
+* Mount failures
+* Permission problems
+* Other runtime-level failures
+
+The kubelet/container runtime Events provide the actual error and should be checked instead of relying only on the displayed reason.
+
+---
+
+# Troubleshooting Workflow
+
+When a Pod is not working correctly, do not rely only on the value shown by:
+
+```bash
+kubectl get pods
+```
+
+Use a layered approach:
+
+```text
+Pod Phase
+    ↓
+Pod Conditions
+    ↓
+Container State
+    ↓
+Container termination reason
+    ↓
+Events
+    ↓
+Logs
+    ↓
+Node / kubelet / runtime
+```
+
+Useful commands:
+
+```bash
+kubectl get pod <pod-name>
+kubectl describe pod <pod-name>
+kubectl get pod <pod-name> -o yaml
+kubectl logs <pod-name>
+kubectl logs <pod-name> --previous
+```
+
+For multi-container Pods:
+
+```bash
+kubectl logs <pod-name> -c <container-name>
+```
+
+`--previous` is particularly useful for containers that are repeatedly crashing because it retrieves logs from the previous container instance.
+
+---
+
+# Quick Mental Model
+
+| Symptom                      | Usually investigate                                               |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `Pending`                    | Scheduling, resources, volumes, initialization                    |
+| `ErrImagePull`               | Image name, tag, registry, authentication, network                |
+| `ImagePullBackOff`           | Repeated image-pull failure                                       |
+| `CreateContainerConfigError` | ConfigMap, Secret, volume, container configuration                |
+| `CreateContainerError`       | Container creation/runtime problem                                |
+| `CrashLoopBackOff`           | Application crash, command, configuration, liveness/startup probe |
+| `OOMKilled`                  | Memory usage and memory limits                                    |
+| `ContainerCannotRun`         | Container process/runtime startup                                 |
+| `RunContainerError`          | Container runtime startup/initialization                          |
+| `Unknown`                    | Node/kubelet/control-plane communication                          |
+
+### Final Mental Model
+
+```text
+Pod Phase
+    │
+    ├── Pending
+    ├── Running
+    ├── Succeeded
+    ├── Failed
+    └── Unknown
+          │
+          ▼
+Pod Conditions
+    │
+    ├── PodScheduled
+    ├── Initialized
+    ├── ContainersReady
+    └── Ready
+          │
+          ▼
+Container State
+    │
+    ├── Waiting
+    ├── Running
+    └── Terminated
+          │
+          ▼
+Container Reasons / Exit Codes
+    │
+    ├── ImagePullBackOff
+    ├── CrashLoopBackOff
+    ├── OOMKilled
+    ├── CreateContainerError
+    └── etc.
+```
+
+The key distinction to remember is:
+
+> **Phase tells you the Pod's high-level lifecycle, Conditions tell you whether important Pod conditions are satisfied, and Container State/Reason tells you what is happening to individual containers.**
+
