@@ -381,3 +381,28 @@ Annotations
 ```
 
 Both are stored under the object's `metadata`, but they serve fundamentally different purposes.
+
+# UID
+
+Kubernetes also assigns every object a UID:
+
+```yaml
+metadata:
+  uid: 7c2f...
+```
+
+The UID uniquely identifies a particular object instance across the cluster.
+
+This becomes important when an object is deleted and another object is later created with the same name. The new object has a different UID:
+
+```
+Pod nginx
+UID: abc123
+    ↓
+deleted
+    ↓
+Pod nginx created again
+UID: xyz789
+```
+
+Although both are called nginx, Kubernetes knows they are different object instances.

@@ -865,7 +865,7 @@ A **liveness probe**, when it fails according to its configuration, can cause th
 
 ---
 
-# Common Pod Startup and Container Errors
+## Common Pod Startup and Container Errors
 
 The following statuses are frequently seen when troubleshooting Pods with:
 
@@ -1046,6 +1046,38 @@ or:
 ```bash
 kubectl get pod <pod-name> -o jsonpath='{.status.containerStatuses[*].lastState.terminated.reason}'
 ```
+> ### Memory Leak
+> 
+> A **memory leak** occurs when an application keeps memory that it no longer needs, causing memory usage to continuously increase over time.
+> 
+> Common causes include:
+> 
+> * Objects or data that remain referenced unnecessarily
+> * Global variables or collections that grow indefinitely
+> * Event listeners or callbacks that are never removed
+> * Caches without size limits or expiration
+> 
+> Memory leaks can occur in both managed languages such as Java, Python, and JavaScript, and unmanaged languages such as C and C++.
+> 
+> In Kubernetes, a memory leak can cause a container to exceed its memory limit. The Linux kernel may then terminate the container, resulting in:
+> 
+> ```text
+> Memory leak
+>     ↓
+> Memory usage increases
+>     ↓
+> Memory limit exceeded
+>     ↓
+> OOMKilled
+>     ↓
+> Container restarts
+>     ↓
+> Repeated failures
+>     ↓
+> CrashLoopBackOff
+> ```
+> 
+> **Important:** Restarting the container only temporarily releases the accumulated memory. The actual solution is to identify and fix the cause of the memory leak.
 
 ---
 
@@ -1083,7 +1115,7 @@ The kubelet/container runtime Events provide the actual error and should be chec
 
 ---
 
-# Troubleshooting Workflow
+## Troubleshooting Workflow
 
 When a Pod is not working correctly, do not rely only on the value shown by:
 
@@ -1129,7 +1161,7 @@ kubectl logs <pod-name> -c <container-name>
 
 ---
 
-# Quick Mental Model
+## Quick Mental Model
 
 | Symptom                      | Usually investigate                                               |
 | ---------------------------- | ----------------------------------------------------------------- |
@@ -1184,3 +1216,658 @@ The key distinction to remember is:
 
 > **Phase tells you the Pod's high-level lifecycle, Conditions tell you whether important Pod conditions are satisfied, and Container State/Reason tells you what is happening to individual containers.**
 
+---
+
+## Pod Restart Policy
+
+The **restart policy** determines how kubelet handles terminated containers in a Pod. It is defined at the **Pod level** and applies to the Pod's containers.
+
+The available policies are:
+
+| Policy      | Behavior                                                   | Typical Use                 |
+| ----------- | ---------------------------------------------------------- | --------------------------- |
+| `Always`    | Restart containers whenever they terminate                 | Long-running workloads      |
+| `OnFailure` | Restart containers only when they terminate unsuccessfully | Batch/short-lived workloads |
+| `Never`     | Do not restart terminated containers                       | One-time tasks              |
+
+`Always` is the default restart policy.
+
+For example:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-pod
+spec:
+  restartPolicy: Always
+  containers:
+    - name: my-container
+      image: nginx
+```
+
+### Exit Codes
+
+A container process normally returns an exit code when it terminates:
+
+* `0` → successful termination
+* Non-zero → unsuccessful termination
+
+With `OnFailure`, a non-zero exit code causes the container to be restarted.
+
+The restart policy controls **container restarts**, not Pod replacement. A higher-level controller such as a Deployment or Job is responsible for managing the desired number and lifecycle of Pods.
+
+### Init Containers
+
+Init Containers are also subject to the Pod's restart policy, but their behavior is different from application containers.
+
+An Init Container must complete successfully before the next Init Container or the application containers can start. If it fails, kubelet retries it according to the Pod's restart policy.
+
+---
+
+## Pod Termination
+
+When a Pod is deleted or terminated, Kubernetes normally attempts to shut it down gracefully.
+
+A simplified process is:
+
+```text
+Pod deletion requested
+        ↓
+Pod marked for deletion
+        ↓
+Pod enters termination process
+        ↓
+Container termination requested
+        ↓
+SIGTERM
+        ↓
+Termination grace period
+        ↓
+SIGKILL if necessary
+        ↓
+Pod removed
+```
+
+The default `terminationGracePeriodSeconds` is **30 seconds**, unless configured otherwise.
+
+For example:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 30
+```
+
+During termination, Kubernetes updates the Pod's endpoint/serving state so that terminating Pods can be removed from normal Service traffic.
+
+Applications should therefore handle termination signals gracefully, for example by:
+
+* Stopping acceptance of new work
+* Finishing in-progress requests when possible
+* Closing connections
+* Flushing important data
+* Exiting cleanly
+
+If the container does not terminate within the grace period, it may be forcibly terminated with `SIGKILL`.
+
+---
+
+# Pod Lifecycle Hooks
+
+Kubernetes provides container lifecycle hooks that allow applications to perform actions during important lifecycle events.
+
+The two hooks are:
+
+- ### PostStart
+
+  `PostStart` is executed after the container is created.
+
+  It can be used for initialization actions, but it should **not be relied upon to execute before the container's main process starts**, because Kubernetes does not guarantee the ordering between the `PostStart` hook and the container entrypoint.
+
+- ### PreStop
+  
+  `PreStop` is executed when Kubernetes begins terminating the container.
+  
+  It can be used for graceful shutdown or cleanup tasks.
+
+Example:
+
+```yaml
+lifecycle:
+  postStart:
+    exec:
+      command:
+        - sh
+        - -c
+        - echo "Container started"
+
+  preStop:
+    exec:
+      command:
+        - sh
+        - -c
+        - echo "Container stopping"
+```
+
+`PreStop` runs as part of the termination process and consumes time from the Pod's termination grace period.
+
+---
+
+# Pod Lifecycle Summary
+
+A simplified lifecycle for a Pod is:
+
+```text
+Manifest submitted
+        ↓
+kube-apiserver
+        ↓
+Pod object stored
+        ↓
+Scheduler assigns node
+        ↓
+kubelet receives Pod assignment
+        ↓
+Init Containers run
+        ↓
+Application containers start
+        ↓
+Pod → Running
+        ↓
+Containers may restart
+        ↓
+Pod eventually deleted
+        ↓
+Succeeded / Failed
+```
+
+The final phase depends on how the Pod terminates.
+
+For example:
+
+```text
+Job
+ ↓
+Pod
+ ↓
+Container completes successfully
+ ↓
+Pod → Succeeded
+```
+
+Whereas a long-running Deployment Pod normally remains:
+
+```text
+Pod → Running
+```
+
+until it is replaced or deleted.
+
+---
+
+# Comprehensive Pod Manifest Example
+
+The following example demonstrates several important Pod features without attempting to include every available Pod field.
+
+```yaml
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: advanced-pod
+  namespace: default
+  labels:
+    app: demo
+    tier: backend
+  annotations:
+    description: "Example Pod demonstrating common Pod features"
+
+spec:
+  restartPolicy: Always
+
+  nodeSelector:
+    disktype: ssd
+
+  volumes:
+    - name: data-volume
+      emptyDir: {}
+
+  initContainers:
+    - name: init-script
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - echo "Initializing application"; sleep 5
+
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "128Mi"
+
+      volumeMounts:
+        - name: data-volume
+          mountPath: /init-data
+
+  containers:
+    - name: app-container
+      image: nginx:1.25
+      imagePullPolicy: IfNotPresent
+
+      ports:
+        - name: http
+          containerPort: 80
+
+      env:
+        - name: ENVIRONMENT
+          value: production
+
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+
+      volumeMounts:
+        - name: data-volume
+          mountPath: /var/data
+
+      lifecycle:
+        postStart:
+          exec:
+            command:
+              - sh
+              - -c
+              - echo "Container started"
+
+        preStop:
+          exec:
+            command:
+              - sh
+              - -c
+              - echo "Container stopping"
+
+      securityContext:
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+
+  terminationGracePeriodSeconds: 30
+```
+
+## Important Sections
+
+### `apiVersion`
+
+Pods belong to the core Kubernetes API group and use:
+
+```yaml
+apiVersion: v1
+```
+
+### `kind`
+
+Defines the Kubernetes object type:
+
+```yaml
+kind: Pod
+```
+
+### `metadata`
+
+Identifies and organizes the Pod.
+
+Important fields include:
+
+* `name`
+* `namespace`
+* `labels`
+* `annotations`
+
+### `spec`
+
+Defines the desired configuration of the Pod.
+
+Important fields demonstrated here include:
+
+* `restartPolicy`
+* `nodeSelector`
+* `volumes`
+* `initContainers`
+* `containers`
+* `terminationGracePeriodSeconds`
+
+### `imagePullPolicy`
+
+Controls when kubelet asks the container runtime to pull the image.
+
+| Policy         | Behavior                                              |
+| -------------- | ----------------------------------------------------- |
+| `Always`       | Always attempt to pull the image                      |
+| `IfNotPresent` | Pull only if the image is not already present locally |
+| `Never`        | Never pull; image must already exist locally          |
+
+### `ports`
+
+Documents the ports that the container is intended to use. Defining `containerPort` **does not expose the Pod outside the cluster**. Services and other networking mechanisms are used for that.
+
+### `env`
+
+Defines environment variables available inside the container.
+
+### `resources`
+
+Defines CPU and memory requirements:
+
+* `requests` → resources used for scheduling decisions
+* `limits` → maximum resource usage enforced by Kubernetes/Linux mechanisms
+
+### `volumeMounts`
+
+Mounts a Pod volume into the container's filesystem.
+
+---
+
+# What Happens When We Create a Pod?
+
+When we run:
+
+```bash
+kubectl apply -f pod.yaml
+```
+
+Kubernetes processes the request through several components.
+
+## 1. kubectl
+
+`kubectl`:
+
+1. Reads the manifest.
+2. Parses the YAML.
+3. Uses the kubeconfig to determine the API server and authentication information.
+4. Sends an HTTP/HTTPS request to the kube-apiserver.
+
+Conceptually:
+
+```text
+kubectl
+   │
+   │ HTTP/HTTPS
+   ▼
+kube-apiserver
+```
+
+`kubectl` does **not** communicate directly with etcd.
+
+---
+
+## 2. kube-apiserver
+
+The API server receives the request and performs processing such as:
+
+### Authentication
+
+Determines who is making the request.
+
+Examples include:
+
+* Client certificates
+* Bearer tokens
+* OpenID Connect
+* Service account credentials
+
+### Authorization
+
+Determines whether the authenticated identity is allowed to perform the requested operation.
+
+For example:
+
+```text
+Can Alice create Pods in namespace default?
+```
+
+RBAC is commonly used for authorization.
+
+### Admission and Validation
+
+The API server processes admission controls and validates the resource against the Kubernetes API schema.
+
+If the request is accepted, the Pod object is persisted.
+
+---
+
+## 3. Pod Stored in etcd
+
+The API server persists the Pod's API object in etcd.
+
+At this point, the Pod has been accepted by the cluster, but it may not yet have a node assigned.
+
+Conceptually:
+
+```text
+Pod
+├── Desired configuration
+├── Node: not assigned
+└── Status: Pending
+```
+
+The API server is the component that communicates with etcd.
+
+```text
+kube-apiserver
+       │
+       ▼
+     etcd
+```
+
+---
+
+## 4. Scheduler Detects the Pod
+
+The kube-scheduler observes Pods that do not yet have a node assignment.
+
+It evaluates available nodes based on scheduling requirements.
+
+Examples include:
+
+* Resource requests
+* `nodeSelector`
+* Node affinity
+* Taints and tolerations
+* Pod affinity/anti-affinity
+* Other scheduling constraints
+
+---
+
+## 5. Scheduler Selects a Node
+
+The scheduler selects a suitable node.
+
+For example:
+
+```text
+Pod nginx-pod
+      ↓
+Scheduler
+      ↓
+nodeA
+```
+
+The scheduler does **not** start the Pod. It records the scheduling decision through the API server.
+
+The Pod now contains a node assignment such as:
+
+```yaml
+spec:
+  nodeName: nodeA
+```
+
+---
+
+## 6. kubelet Receives the Assignment
+
+The kubelet on `nodeA` observes that a Pod has been assigned to its node.
+
+It then begins reconciling the desired Pod state with the actual state on the node.
+
+```text
+API Server
+     ↓
+kubelet
+     ↓
+Pod preparation
+```
+
+---
+
+## 7. Pod and Container Preparation
+
+The kubelet coordinates with the container runtime through the **Container Runtime Interface (CRI)**.
+
+The runtime is responsible for tasks such as:
+
+* Pulling images
+* Creating containers
+* Starting containers
+* Stopping containers
+* Managing container processes
+
+The kubelet also coordinates Pod networking and volume setup through the relevant Kubernetes components/plugins.
+
+Simplified:
+
+```text
+kubelet
+   ↓
+CRI
+   ↓
+container runtime
+   ↓
+containers
+```
+
+---
+
+## 8. Init Containers Run
+
+If the Pod contains Init Containers, they run before the application containers.
+
+```text
+Init Container 1
+       ↓
+Init Container 2
+       ↓
+Application containers
+```
+
+Each Init Container must complete successfully before the next one starts.
+
+---
+
+## 9. Application Containers Start
+
+After all Init Containers complete successfully, kubelet starts the regular application containers.
+
+The Pod can then reach the `Running` phase when the conditions for that phase are satisfied.
+
+---
+
+## 10. Status Updates
+
+The kubelet continuously observes the Pod and its containers and reports status information through the API server.
+
+For example:
+
+```text
+kubelet
+   ↓
+kube-apiserver
+   ↓
+Pod status
+```
+
+The API server persists the API object's state in etcd.
+
+The status may include:
+
+* Pod phase
+* Pod conditions
+* Container states
+* Container termination information
+* Pod IP information
+
+---
+
+## 11. kubectl Gets the Status
+
+When you run:
+
+```bash
+kubectl get pods
+```
+
+the flow is:
+
+```text
+kubectl
+   ↓
+kube-apiserver
+   ↓
+API object/status
+```
+
+`kubectl` does **not** directly query etcd.
+
+The API server provides the Kubernetes API view of the object's current state.
+
+---
+
+# Complete Creation Flow
+
+The entire process can be summarized as:
+
+```text
+kubectl apply -f pod.yaml
+          ↓
+    kube-apiserver
+          ↓
+ Authentication
+ Authorization
+ Admission / Validation
+          ↓
+       etcd
+          ↓
+   Pod exists in API
+          ↓
+    kube-scheduler
+          ↓
+   Node selected
+          ↓
+    kube-apiserver
+          ↓
+        kubelet
+          ↓
+   Pod preparation
+          ↓
+    Init Containers
+          ↓
+ Application Containers
+          ↓
+  Container Runtime
+          ↓
+      Pod Running
+          ↓
+    kubelet reports status
+          ↓
+    kube-apiserver
+          ↓
+        etcd
+```
+
+The key architectural idea is:
+
+> **The API server is the central API gateway and source of cluster state for Kubernetes components. The scheduler decides where a Pod should run, while kubelet on the selected node makes the Pod actually run.**
