@@ -416,7 +416,7 @@ kubectl describe pod <pod-name>
 
 ---
 
-# Creating Resources
+# Creating and Managing Resources
 
 - ## kubectl create
 
@@ -451,9 +451,7 @@ kubectl describe pod <pod-name>
 
     This is useful for quickly generating a starting manifest.
 
----
-
-# Applying Configuration
+    ---
 
 - ## kubectl apply
 
@@ -494,6 +492,43 @@ kubectl describe pod <pod-name>
     ```
 
     The configuration can be stored in version control and reused across environments, making `kubectl apply` a common tool for declarative Kubernetes management.
+
+    ---
+
+- ## kubectl delete
+
+    kubectl delete is used to remove Kubernetes resources from the cluster.
+
+    Examples:
+
+    ```bash
+    kubectl delete pod nginx-pod
+    kubectl delete deployment nginx
+    kubectl delete service nginx
+    kubectl delete namespace dev
+    ```
+
+    A resource can also be deleted from a manifest:
+
+    ```bash
+    kubectl delete -f deployment.yaml
+    ```
+
+    Multiple resources can be deleted together:
+
+    ```bash
+    kubectl delete pod nginx-1 nginx-2
+    ```
+
+    You can also delete all resources of a particular type in a namespace:
+
+    ```bash
+    kubectl delete pods --all -n dev
+    ```
+
+    > **Important:** Deleting a higher-level resource can cause other resources to be deleted as a consequence of Kubernetes ownership relationships. For example, deleting a Deployment normally results in its managed ReplicaSet and Pods being removed.
+
+    > The deletion process is not necessarily immediate. Kubernetes marks the object for deletion and performs the termination/cleanup process. **Finalizers** can prevent an object from being fully removed until required cleanup is completed.
 
 ---
 
@@ -580,6 +615,42 @@ kubectl describe pod <pod-name>
     kubectl patch  → targeted field modification
     ```
 
+    ---
+
+- ## kubectl rollout
+
+    kubectl rollout is used to manage and inspect the rollout of workload resources, particularly Deployments. A rollout represents the process of transitioning a workload from one version of its configuration to another.
+
+    For example, when a Deployment's container image changes, Kubernetes can create a new ReplicaSet and gradually replace the old Pods according to the Deployment's update strategy.
+
+    ### Common commands:
+
+    - ### Check rollout status
+
+        `kubectl rollout status deployment/nginx` → Displays the progress of the Deployment until the rollout completes.
+
+    - ### View rollout history
+
+        `kubectl rollout history deployment/nginx` → Displays the available rollout revisions.
+
+    - ### Undo a rollout
+
+        `kubectl rollout undo deployment/nginx` → Reverts the Deployment to its previous revision.
+
+        A specific revision can be selected →  `kubectl rollout undo deployment/nginx --to-revision=2`
+
+    - ### Restart a workload
+
+        `kubectl rollout restart deployment/nginx` → Triggers a new rollout without necessarily changing the Deployment's configuration. This is commonly used to restart all Pods managed by a Deployment.
+
+    - ### Pause and resume a rollout
+        ```
+        kubectl rollout pause deployment/nginx
+        kubectl rollout resume deployment/nginx
+        ```
+
+        These can be useful when making multiple changes that should be rolled out together.
+
 ---
 
 # Debugging
@@ -646,41 +717,57 @@ kubectl describe pod <pod-name>
 
     `kubectl exec` is primarily an operational and troubleshooting tool. It does not modify the Pod's declared configuration.
 
----
+    ---
+
+- ## kubectl port-forward
+
+    `kubectl port-forward` creates a temporary connection from a local machine to a Pod or another supported Kubernetes resource.
+
+    Syntax:
+
+    ```
+    kubectl port-forward TYPE/NAME LOCAL_PORT:REMOTE_PORT
+    ```
+
+    For example:
+
+    ```bash
+    kubectl port-forward pod/nginx-pod 8080:80
+    ```
+
+    This maps:
+
+    ```
+    Local machine                  Kubernetes
+    localhost:8080 ──────────────→ Pod:80
+    ```
+
+    You can then access the application locally: `http://localhost:8080`
+
+    It can also target a Service:
+
+    ```
+    kubectl port-forward service/nginx 8080:80
+    ```
+
+    Or a Deployment:
+
+    ```
+    kubectl port-forward deployment/nginx 8080:80
+    ```
+
+    > By default, the local port listens on localhost. The forwarding process remains active while the command is running; terminating the command removes the forwarding.
+
+    **Common use cases**
+
+    `kubectl port-forward` is particularly useful for:
+
+    - Accessing an internal application during debugging
+    - Testing a Service without exposing it externally
+    - Accessing internal dashboards
+    - Connecting temporarily to databases or APIs
+    - Local development and troubleshooting
+
+    It is not normally a production exposure mechanism. It is intended primarily for temporary access from the administrator's machine.
 
 ---
-
-## Remaining parts:
-
-`Resource Inspection`
-
-`kubectl get`
-
-`kubectl describe`
-
-`kubectl explain`
-
-`Creating Resources
-`
-`kubectl create
-`
-`kubectl apply
-`
-4. Updating Resources
-`kubectl edit`
-
-`kubectl patch`
-
-kubectl rollout
-
-5. Deleting Resources
-kubectl delete
-6. Debugging
-
-kubectl logs
-kubectl exec
-kubectl port-forward
-7. Namespace Management
-
-kubectl get ns
-kubectl create namespace
