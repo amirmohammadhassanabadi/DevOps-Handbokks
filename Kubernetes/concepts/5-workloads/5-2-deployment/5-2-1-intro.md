@@ -238,6 +238,129 @@ Deployment → "Which ReplicaSet should be active, and how should
 
 ---
 
+## Example Manifest
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+  labels:
+    app: web
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: web
+
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+```
+
+This example defines a Deployment with **three desired Pod replicas** running an NGINX container.
+
+The `RollingUpdate` strategy controls how Pods are replaced when the Deployment's Pod template changes.
+
+* **`maxSurge: 1`** → the Deployment can temporarily have **up to one additional Pod above the desired replica count**.
+* **`maxUnavailable: 1`** → **at most one Pod can be unavailable** during the rollout.
+
+With three desired replicas, `maxSurge: 1` allows the rollout to temporarily have up to **4 Pods**, while `maxUnavailable: 1` ensures that the rollout does not intentionally reduce availability below **2 available Pods**.
+
+These are **limits, not instructions**. Kubernetes does not simply interpret them as "delete one Pod and create one Pod." The Deployment Controller continuously adjusts the old and new ReplicaSets while respecting these limits.
+
+---
+
+## Pod Naming in Deployments
+
+Pods created by a Deployment do not have fixed names defined in the Pod template. The Deployment creates a ReplicaSet, and the ReplicaSet creates Pods with generated names.
+
+A Pod name generally follows this structure:
+
+```text
+<deployment-name>-<replicaset-hash>-<pod-id>
+```
+
+For example:
+
+```text
+web-deployment-7c9d8f6d5b-abc12
+```
+
+The components are:
+
+```text
+web-deployment    → Deployment name
+7c9d8f6d5b        → ReplicaSet hash
+abc12             → unique Pod-generated suffix
+```
+
+The **ReplicaSet hash** is derived from the Pod template and is used to distinguish ReplicaSets created from different Deployment revisions.
+
+For example:
+
+```text
+Deployment
+    │
+    ├── ReplicaSet: web-deployment-7c9d8f6d5b
+    │       ├── web-deployment-7c9d8f6d5b-abc12
+    │       ├── web-deployment-7c9d8f6d5b-def34
+    │       └── web-deployment-7c9d8f6d5b-ghi56
+    │
+    └── ReplicaSet: web-deployment-6f8a2c4e91
+            ├── web-deployment-6f8a2c4e91-jkl78
+            ├── web-deployment-6f8a2c4e91-mno90
+            └── ...
+```
+
+When the Deployment's Pod template changes, such as:
+
+```yaml
+image: nginx:1.25
+```
+
+to:
+
+```yaml
+image: nginx:1.26
+```
+
+the Deployment Controller creates a **new ReplicaSet** with a different Pod-template hash. Pods created by that ReplicaSet therefore receive names containing the new hash.
+
+```text
+nginx:1.25
+     ↓
+ReplicaSet A
+     ↓
+web-deployment-7c9d8f6d5b-xxxxx
+
+        update
+
+nginx:1.26
+     ↓
+ReplicaSet B
+     ↓
+web-deployment-6f8a2c4e91-xxxxx
+```
+
+This naming structure makes it possible to identify which ReplicaSet a Pod belongs to, although the **Pod name itself should not be treated as a stable identity**.
+
+---
+
 > # Stateless vs Stateful Applications
 > 
 > The distinction between **stateless** and **stateful** applications is important when selecting a Kubernetes workload resource.
