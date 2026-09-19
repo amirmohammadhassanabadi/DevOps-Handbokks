@@ -285,6 +285,69 @@ These are **limits, not instructions**. Kubernetes does not simply interpret the
 
 ---
 
+## Selectors & Pod Template
+
+A Deployment uses a **selector** to determine which Pods belong to it. The selector must match the labels defined in the Pod template.
+
+```yaml
+spec:
+  selector:
+    matchLabels:
+      app: web
+
+  template:
+    metadata:
+      labels:
+        app: web
+```
+
+**Here:**
+
+- **`spec.selector`** defines which Pods the Deployment manages.
+- **`spec.template.metadata.labels`** defines the labels applied to Pods created by the Deployment.
+- The selector must match the corresponding Pod template labels.
+- The Deployment uses this relationship to identify the Pods managed through its ReplicaSets.
+
+The flow is:
+
+```
+Deployment
+ │
+ │ selector: app=web
+ ↓
+ReplicaSet
+ │
+ │ creates Pods with label app=web
+ ↓
+Pods
+ ├── app=web
+ ├── app=web
+ └── app=web
+```
+
+**Important:** The selector is not simply a label that the Deployment gives to its Pods. It is the selection rule used to identify the Pods belonging to the Deployment.
+
+For example, with:
+
+```yaml
+selector:
+  matchLabels:
+    app: web
+```
+
+a Pod must have:
+
+```yaml
+labels:
+  app: web
+```
+
+to match that selector.
+
+> In an **apps/v1 Deployment**, the selector is **immutable after creation**, so it should be designed carefully.
+
+---
+
 ## Pod Naming in Deployments
 
 Pods created by a Deployment do not have fixed names defined in the Pod template. The Deployment creates a ReplicaSet, and the ReplicaSet creates Pods with generated names.
