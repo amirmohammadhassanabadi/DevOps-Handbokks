@@ -569,6 +569,151 @@ For example, an application might require exclusive access to a resource that ca
 
 ---
 
+## Availability & Progress
+
+During a Deployment rollout, Kubernetes needs to determine whether new Pods are becoming ready and whether the rollout is making progress. Two settings control important parts of this behavior: **`minReadySeconds`** and **`progressDeadlineSeconds`**.
+
+- ### minReadySeconds
+
+    `minReadySeconds` specifies how long a newly created Pod must remain **Ready** without any container crashing or becoming unready before the Deployment considers that Pod **available**.
+    
+    ```yaml
+    spec:
+      minReadySeconds: 10
+    ```
+    
+    With `minReadySeconds: 10`, a Pod must remain continuously Ready for 10 seconds before it counts as available.
+    
+    This is useful when an application can become Ready briefly and then fail shortly afterward. It prevents Kubernetes from immediately considering such a Pod reliably available.
+    
+    Default:
+    
+    ```yaml
+    minReadySeconds: 0
+    ```
+    
+    With the default value, a Pod can be considered available as soon as it becomes Ready.
+
+- ### progressDeadlineSeconds
+
+  `progressDeadlineSeconds` specifies how long Kubernetes waits for a Deployment rollout to make progress before considering the rollout **stalled**.
+
+  ```yaml
+  spec:
+    progressDeadlineSeconds: 600
+  ```
+
+  The default is:
+
+  ```text
+  600 seconds
+  ```
+
+  If the Deployment does not make sufficient progress within this period, Kubernetes reports:
+
+  ```text
+  ProgressDeadlineExceeded
+  ```
+
+  This does **not** automatically roll back the Deployment. Kubernetes reports the stalled rollout, but rollback must be performed separately if required.
+
+### Deployment Conditions
+
+Kubernetes exposes Deployment conditions through:
+
+```bash
+kubectl describe deployment <deployment-name>
+```
+
+and:
+
+```bash
+kubectl get deployment <deployment-name> -o yaml
+```
+
+The main conditions are:
+
+| Condition        | Meaning                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `Progressing`    | The Deployment is making progress, such as creating a new ReplicaSet or increasing the number of updated/available Pods. |
+| `Available`      | The Deployment has the required number of available Pods according to its availability requirements.                     |
+| `ReplicaFailure` | The Deployment encountered a failure while creating or managing its ReplicaSet or Pods.                                  |
+
+For example:
+
+```yaml
+status:
+  conditions:
+    - type: Progressing
+      status: "True"
+      reason: NewReplicaSetAvailable
+
+    - type: Available
+      status: "True"
+      reason: MinimumReplicasAvailable
+```
+
+A stalled rollout may report:
+
+```yaml
+- type: Progressing
+  status: "False"
+  reason: ProgressDeadlineExceeded
+```
+
+### ProgressDeadlineExceeded
+
+A Deployment can become stalled for several reasons, for example:
+
+* New Pods cannot be scheduled because of insufficient cluster resources.
+* The container image cannot be pulled.
+* Pods repeatedly fail their health checks.
+* Pods never become Ready.
+* A required Deployment condition is not satisfied.
+
+When the progress deadline is exceeded, Kubernetes sets the `Progressing` condition to `False` with the reason `ProgressDeadlineExceeded`.
+
+The Deployment does **not** automatically revert to the previous version.
+
+The operator can investigate the problem and, if necessary, perform a rollback:
+
+```bash
+kubectl rollout undo deployment/<deployment-name>
+```
+
+### Example
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  replicas: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 300
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.26
+```
+
+In this example:
+
+* A newly updated Pod must remain Ready for **10 seconds** before it counts as available.
+* Kubernetes allows up to **300 seconds** for the rollout to make progress.
+* If progress stalls for longer than 300 seconds, the Deployment reports `ProgressDeadlineExceeded`.
+* Kubernetes does **not** automatically roll back the Deployment.
+
+---
+
 # Summary
 
 Kubernetes Deployments provide two native update strategies:
