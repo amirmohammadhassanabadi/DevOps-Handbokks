@@ -34,6 +34,12 @@ All content is written, tested, and continuously improved as part of my learning
 - Configuration and Secrets
 - Troubleshooting and debugging
 - Cluster operations
+- Advance concepts that we will cover in future:
+    - startOrdinal
+    - PVC retention policies
+    - PodDisruptionBudgets 
+    - topology constraints
+    - StatefulSet behavior during failures,
 
 ## Ansible
 - Inventory management
