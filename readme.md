@@ -35,11 +35,16 @@ All content is written, tested, and continuously improved as part of my learning
 - Troubleshooting and debugging
 - Cluster operations
 - Advance concepts that we will cover in future:
-    - startOrdinal
-    - PVC retention policies
-    - PodDisruptionBudgets 
-    - topology constraints
-    - StatefulSet behavior during failures,
+    - **statefulset**
+        - startOrdinal
+        - PVC retention policies
+        - PodDisruptionBudgets 
+        - topology constraints
+        - StatefulSet behavior during failures,
+    - **daemonset**
+        - topology constraints 
+        - priority classes 
+        - resource management for DaemonSets
 
 ## Ansible
 - Inventory management
