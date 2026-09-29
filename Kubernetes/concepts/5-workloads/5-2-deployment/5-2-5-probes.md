@@ -412,7 +412,6 @@ Therefore:
 ```text
 terminationGracePeriodSeconds = 30
 
-```text
 Pod deletion requested
         │
         ▼
