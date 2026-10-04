@@ -26,8 +26,8 @@
 
 ## Topic 104: Devices, Linux Filesystems, Filesystem Hierarchy Standard
 
-- 104.1 Create partitions and filesystems
-- 104.2 Maintain the integrity of filesystems
+- `104.1 Create partitions and filesystems`
+- `104.2 Maintain the integrity of filesystems`
 - 104.3 Control mounting and unmounting of filesystems
 - 104.4 Removed
 - 104.5 Manage file permissions and ownership
