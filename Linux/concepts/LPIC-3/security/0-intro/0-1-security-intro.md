@@ -6,6 +6,18 @@ This section introduces foundational information-security concepts, common softw
 
 ## What Is Information Security?
 
+```
+                                  /\
+                                 /  \
+                                /    \
+                               /      \
+        Confidentiality (C)   /        \  Integrity (I)
+                             /          \ 
+                            /            \
+                           /______________\
+                           Availability (A)
+```
+
 Information security (InfoSec) protects information and the systems that store, process, and transmit it. A common foundational model is the **CIA triad**, consisting of three objectives:
 
 | Objective | Meaning | Example |
