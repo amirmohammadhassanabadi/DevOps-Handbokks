@@ -6,6 +6,8 @@ This section introduces foundational information-security concepts, common softw
 
 ## What Is Information Security?
 
+Information security (InfoSec) protects information and the systems that store, process, and transmit it. A common foundational model is the **CIA triad**, consisting of three objectives:
+
 ```
                                   /\
                                  /  \
@@ -18,8 +20,6 @@ This section introduces foundational information-security concepts, common softw
                            Availability (A)
 ```
 
-Information security (InfoSec) protects information and the systems that store, process, and transmit it. A common foundational model is the **CIA triad**, consisting of three objectives:
-
 | Objective | Meaning | Example |
 |---|---|---|
 | **Confidentiality** | Preventing unauthorized disclosure of information. | Restricting access to private keys and sensitive files. |
@@ -28,7 +28,48 @@ Information security (InfoSec) protects information and the systems that store, 
 
 These objectives can conflict. For example, restricting access too aggressively may protect confidentiality but prevent legitimate users from accessing a service.
 
-Security controls should therefore be selected according to the system's risks and requirements. The CIA triad is a foundational model, not an exhaustive list of every security objective.
+- ### Confidentiality and Cryptography
+
+    **Confidentiality** prevents unauthorized disclosure of information. Cryptography, particularly encryption, is a major mechanism for protecting confidentiality, but other controls are also necessary.
+
+    - **Encryption:** Protects data from being read by parties without the appropriate decryption key.
+    - **Access control:** Restricts access to authorized users and processes.
+    - **Authentication:** Helps establish identity before access is granted.
+
+    Encryption does not protect data if keys are compromised or sensitive information is exposed before encryption or after decryption.
+
+- ### Data Integrity and Data Origin Authentication
+
+    - **Data integrity** means protecting the accuracy and completeness of data against unauthorized or unintended modification, insertion, deletion, or corruption.
+
+        If system X sends data to system Y, integrity mechanisms help Y detect whether the data has been altered in transit or otherwise tampered with.
+
+        **Common mechanisms include:**
+
+        - **Cryptographic hash:** Produces a digest that can help detect changes when compared with a trusted reference. A hash alone does not authenticate the source.
+        - **Message Authentication Code (MAC):** Uses a shared secret key to provide message integrity and authentication to parties possessing that key.
+        - **Digital signature:** Allows verification of signed data integrity and that the signature corresponds to a particular signing key.
+
+    - **source integrity**
+        - **Data origin authentication** provides assurance that data came from the claimed source. It is distinct from **entity authentication**, which establishes the identity of a communicating user or system.
+
+        - **Non-repudiation** concerns evidence that can help prevent a party from credibly denying an action, such as signing a message. Digital signatures can support non-repudiation, but a valid signature alone does not prove the real-world identity of the signer or automatically establish legal non-repudiation. Identity verification, key ownership, key protection, and appropriate procedures also matter.
+
+### Relative Importance of the CIA Triad
+
+**Confidentiality**, **integrity**, and **availability** are all fundamental security objectives, but their relative importance varies according to an organization's mission, business requirements, threat model, and risk assessment.
+
+For example:
+
+- **Intelligence systems:** Unauthorized disclosure may have exceptionally serious consequences, making confidentiality a major priority.
+- **Financial systems:** Integrity of transactions and confidentiality of customer information are critical; availability is also essential.
+- **Public-facing services:** Availability may be a major priority, while confidentiality and integrity remain necessary.
+
+These are illustrative examples, not universal rankings. Even when one objective receives greater emphasis, neglecting the others can create unacceptable risks.
+
+**Threat modeling** identifies assets, potential attackers, attack paths, and threats. **Risk assessment** evaluates the likelihood and impact of those threats in the presence of vulnerabilities and existing controls. Risk management uses this information to select and prioritize security measures.
+
+---
 
 ## Keeping Linux Systems Updated
 
@@ -53,6 +94,8 @@ The CVE program helps security professionals reference the same vulnerability co
 - A vulnerability affecting Linux software may affect only particular products, versions, configurations, or architectures.
 - Not every security issue has a CVE identifier.
 - A system can remain vulnerable even when its package version appears older or newer than a version mentioned in an advisory. Distributions may backport security fixes without adopting the upstream version number.
+
+> **Remote Code Execution (RCE)** is a vulnerability that allows an attacker to execute arbitrary code on a target system remotely, potentially with the privileges of the vulnerable service or process.
 
 ### Security Updates with DNF
 
