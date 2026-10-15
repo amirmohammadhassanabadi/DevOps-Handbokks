@@ -383,7 +383,7 @@ sysctl kernel.randomize_va_space
 
 ---
 
-To understand memory corruption, buffer overflows, and ASLR, you should understand how a running program uses memory. Let's focus on the concepts you actually need for Linux security, without going too deep into computer architecture.
+To understand memory corruption, buffer overflows, and ASLR, you should understand how a running program uses memory. Let's focus on the concepts you actually need for Linux security.
 
 ## A process's memory layout
 When you run a program, Linux creates a process with its own virtual address space. That address space contains different regions used for different purposes.
@@ -415,8 +415,364 @@ Conceptual diagram — not to scale; exact layout varies.
 |                   Text (code)                         |
 |               Program instructions                    |
 ---------------------------------------------------------
+Illustrative arrangement only. Modern processes may use different layouts and additional mappings.
 ```
 
-Illustrative arrangement only. Modern processes may use different layouts and additional mappings.
-
 The key regions to know are the stack, heap, data/BSS, and text (code). The mapped regions are also relevant to shared libraries and ASLR.
+
+- ## Stack
+
+    The stack is a memory region used to manage function calls and their temporary data.
+
+    For example:
+
+    ```c
+    void example(void)
+    {
+        int age = 25;
+        char name[100];
+    }
+    ```
+
+
+    When `example()` runs, its local variables typically live in a stack frame on the stack.
+
+    The stack is also used for information needed to manage **function calls**, such as **return addresses** and **saved register values**, depending on the architecture and compiler.
+
+    **Important properties:**
+
+    - Stack frames are typically created when functions are called and released when they return.
+    - Each thread normally has its own stack.
+    - Stack space is limited; excessive recursion or large stack allocations can exhaust it.
+    - A stack-based buffer overflow occurs when a program writes beyond a buffer located on the stack.
+
+    **Security connection:** A stack-based buffer overflow can overwrite nearby data in a stack frame and, in some circumstances, interfere with program control flow.
+
+    > ## What is a function call?
+    >
+    > A function is a named block of code that performs a task. A function call means asking the program to execute that function.
+    >
+    > For example:
+    >
+    > ```c
+    > #include <stdio.h>
+    > 
+    > void greet(void)
+    > {
+    >     printf("Hello!\n");
+    > }
+    > 
+    > int main(void)
+    > {
+    >     greet();  // Function call
+    >     return 0;
+    > }
+    > ```
+    > 
+    > When the program reaches `greet()`;, execution temporarily moves from `main()` to `greet()`. After `greet()` finishes, execution returns to the statement after the call in `main()`.
+    >
+    > The flow is:
+    >
+    > ```
+    > ---------------------------------
+    > | 1. `main()`                   |
+    > | Reaches `greet();`            |
+    > ---------------------------------
+    >                ↓
+    > ---------------------------------
+    > | 2. `greet()`                  |
+    > | Executes printf("Hello!\n");  |
+    > ---------------------------------
+    >                ↓
+    > ---------------------------------
+    > | 3. Back to `main()`           |
+    > | Continues with `return 0;`    |
+    > ---------------------------------
+    > ```
+    > 
+    > ## What is a return address?
+    >
+    > The CPU needs to know where to continue executing after a function finishes. The address of that next instruction is called the return address.
+    >
+    > For example:
+    > ```c
+    > int main(void)
+    > {
+    >     greet();       // Call happens here
+    >     printf("Done\n");  // Continue here after greet() returns
+    > }
+    > ```
+    > 
+    > Conceptually, the CPU must remember the location of the instruction that executes `printf("Done\n");` so that it can resume there after `greet()` finishes.
+    >
+    > On many common architectures and calling conventions, the return address is saved on the stack as part of the function-call process. On others, it may initially be held in a CPU register and saved elsewhere when necessary. The exact mechanism depends on the architecture and calling convention.
+    >
+    > ### How does this relate to stack frames?
+    > When a function is called, it may need space for its local variables, saved registers, and other information. This information is commonly organized into a **stack frame**.
+    >
+    > For example:
+    >
+    > ```c
+    > void calculate(void)
+    > {
+    >     int result = 10;
+    > }
+    > 
+    > int main(void)
+    > {
+    >     calculate();
+    >     return 0;
+    > }
+    > ```
+    > 
+    > While `calculate()` executes, its stack frame may contain the local variable `result` and other function-call information. When the function returns, its stack frame is no longer active, and execution resumes in `main()`.
+    >
+    > **One important distinction:** the compiler and calling convention determine exactly what goes into a stack frame. Not every local variable is necessarily stored there.
+    >
+    > ### Why do return addresses matter in security?
+    > This connects directly to your LPIC-3 303 memory-corruption material.
+    >
+    > A stack-based buffer overflow occurs when a program writes beyond the bounds of a buffer allocated on the stack. Depending on the stack layout, the overflow might overwrite other local data or control-related information, potentially including a saved return address.
+    >
+    > If an attacker can corrupt the return address and bypass relevant protections, they may be able to redirect program execution. This is one historical route to code execution vulnerabilities.
+    >
+    > Modern protections include:
+    > - **Stack canaries**: Detect certain stack overwrites before a function returns.
+    > - **NX/DEP**: Prevent execution from memory regions that should contain data only.
+    > - **ASLR**: Randomizes the locations of memory regions.
+    > - **PIE**: Allows the executable's code location to be randomized.
+    >
+    > These protections make exploitation harder, but they do not fix the underlying out-of-bounds write.
+    >
+    > **The main idea to remember:** the stack is used not only for local variables, but also for managing function calls. That is why corrupting stack memory can sometimes affect where a program executes next.
+
+
+    > ## Where Is User Input Stored in Memory During Program Execution: Stack or Heap?
+    >
+    > The memory location depends on how the program stores the user's input, not on the fact that the user entered it while the program was running.
+    >
+    > Let's look at three examples in C.
+    >
+    > - **User input stored in a local array — typically stack**
+    >
+    >   ```c
+    >   #include <stdio.h>
+    >   
+    >   int main(void)
+    >   {
+    >       char name[100];
+    >   
+    >       scanf("%99s", name);
+    >   
+    >       return 0;
+    >   }
+    >   ```
+    >   
+    >   Here, `name` is a local array, typically stored on the stack. The user's input is written into that array, so the input is stored in stack memory.
+    >
+    > - **User input stored in dynamically allocated memory — heap**
+    >
+    >   ```c
+    >   #include <stdio.h>
+    >   #include <stdlib.h>
+    >   
+    >   int main(void)
+    >   {
+    >       char *name = malloc(100);
+    >   
+    >       if (name == NULL)
+    >           return 1;
+    >   
+    >       scanf("%99s", name);
+    >   
+    >       free(name);
+    >       return 0;
+    >   }
+    >   ```
+    >   
+    >   Here, `name` is a local pointer variable, typically on the stack, but the 100-byte memory block allocated by `malloc()` is on the heap. The user's input goes into that heap allocation.
+    >
+    > - **User input stored in a global array — data/BSS region**
+    >   
+    >   ```c
+    >   #include <stdio.h>
+    >   
+    >   char name[100];
+    >   
+    >   int main(void)
+    >   {
+    >       scanf("%99s", name);
+    >   
+    >       return 0;
+    >   }
+    >   ```
+    >   
+    >   Here, `name` is a global array, so it has static storage duration and is typically placed in the BSS region.
+    >
+    > ### Summary
+    >
+    > | Where the program stores input | Typical memory location |
+    > | --- | --- | 
+    > | Local array, e.g. `char name[100]` inside a function | Stack |
+    > | Memory allocated with `malloc()` | Heap |
+    > | Global or static array | Data/BSS region |
+    >
+    > The key distinction is that user input is just data; the program determines where that data is stored. Input does not automatically go to the stack or heap simply because it was entered interactively.
+     
+    ---
+
+- ## Heap
+
+    The heap is a memory region used for dynamic memory allocation.
+
+    Example in **`C`**:
+
+    ```c
+    #include <stdlib.h>
+
+    int main(void)
+    {
+        int *number = malloc(sizeof(int));
+
+        if (number == NULL)
+            return 1;
+
+        *number = 42;
+
+        free(number);
+        return 0;
+    }
+    ```
+
+    Here:
+
+    - number is a local pointer variable, typically stored on the stack.
+    - `malloc()` allocates memory dynamically, typically from the heap.
+    - `*number` accesses the allocated integer.
+    - `free(number)` releases the allocation.
+
+    Notice that the pointer and the memory it points to are two different things.
+
+    > ### deeper Dive:
+    > 
+    > The key is that `number` and the memory it points to are two different things.
+    >
+    > - **Stack — local pointer variable**
+    > 
+    >   Conceptually, `number` stores a memory address.
+    >
+    >   ```c
+    >   number
+    >   0x1000
+    >   Example address stored in the pointer
+    >   ```
+    > 
+    >   The stored address points to the allocated memory.
+    > 
+    > - **Heap — dynamically allocated integer**
+    > 
+    >   ```c
+    >   Example address: 0x1000
+    >   42
+    >   The actual integer value stored in the allocated memory
+    >   ```
+    > 
+    > The addresses above are illustrative. Here's what happens:
+    >
+    > 1. `int *number` declares a pointer variable named number.
+    > 2. `malloc(sizeof(int))` requests enough dynamically allocated memory to hold an integer.
+    > 3. `malloc()` returns the address of that memory.
+    > 4. The address is stored in `number`.
+    > 5. `*number = 42` writes 42 into the allocated memory, not into the pointer variable itself.
+    >
+    > So, in a typical implementation:
+    >
+    > | Expression | What it represents | Typical location |
+    > | --- | --- | --- |
+    > | **`number`** | The pointer variable holding an address | Stack |
+    > | **`malloc(sizeof(int))`** | The allocated memory | Heap |
+    > | **`*number`** | The integer stored at the pointed-to address | Heap |
+    >
+    > **Important nuance:** **`C`** does not require local variables to be physically stored on the stack. A compiler may keep a variable in a CPU register or optimize it away. But for understanding the usual memory model, thinking of this local pointer as being on the stack is correct.
+    >
+    > Also, `free(number)` releases the allocated heap memory; it does not remove the local pointer variable itself. The local variable's lifetime ends when its scope ends.
+    > 
+
+
+    **Important properties:**
+
+    - Memory can remain allocated after the function that requested it returns.
+    - In `C`, the programmer must manage its lifetime.
+    - Failing to release memory can cause a memory leak.
+    - Accessing memory after releasing it can cause a use-after-free vulnerability.
+    - Writing beyond a heap allocation can cause a heap-based buffer overflow.
+
+    ### Stack vs. heap
+    | Feature | Stack | Heap |
+    | --- | --- | --- |
+    | Main purpose | Function calls and temporary data | Dynamic memory allocation |
+    | Typical allocation | Automatically managed stack frames | Explicit allocation in `C` using `malloc()` or `calloc()` |
+    | Lifetime | Usually associated with function calls | Until released or the process terminates |
+    | Management | Mostly automatic | Programmer-managed in `C` |
+    | Common problems | Stack exhaustion, stack-based buffer overflow | Memory leaks, use-after-free, heap-based buffer overflow |
+    
+    > Do not memorize that stack memory is always faster or that heap memory is always slower. Performance depends on the allocation method, workload, and implementation.
+
+    ---
+
+- ## Text, data, and BSS
+
+    These regions are useful to recognize, particularly when learning about memory layout and ASLR.
+
+    - **Text (code):** Contains the program's machine instructions. It is commonly mapped as readable and executable, but not writable.
+    - **Data segment:** Holds initialized global and static variables.
+    - **BSS:** Holds uninitialized or zero-initialized global and static variables. These variables start with zero values.
+
+    Example:
+
+    ```c
+    int global_initialized = 10;
+    int global_zero;
+
+    int main(void)
+    {
+        static int counter = 5;
+        return 0;
+    }
+    ```
+
+    The global variables and `counter` have static storage duration. Their storage lasts for the lifetime of the process; they are not ordinary local stack variables.
+
+## Virtual memory vs. physical memory
+
+**Virtual memory** is the address space that a process uses. Physical memory is the actual RAM installed in the machine.
+The operating system and the CPU's memory-management hardware translate virtual addresses to physical memory locations. Some virtual memory may also be backed by files or swap rather than currently resident in RAM.
+
+Each process typically has its own virtual address space, so two processes can use the same virtual address while referring to different physical memory.
+
+**Security connection:** ASLR randomizes the locations of certain regions in a process's virtual address space. This makes it harder for an attacker to predict where particular data or code will be located.
+
+###  How these concepts connect to buffer overflows
+
+Suppose a program declares:
+
+```c
+char buffer[100];
+```
+
+This reserves space for 100 bytes. Where the buffer is located depends on how it is declared and used:
+
+- A local array like this is typically on the stack.
+- A buffer allocated using `malloc()` is typically on the heap.
+- A global or static array may reside in the data or BSS region.
+
+If the program writes beyond the buffer's 100-byte boundary, it causes an out-of-bounds write. The consequences depend on where the buffer is located, what memory is adjacent to it, and which protections are enabled.
+
+This is why the terms stack-based buffer overflow and heap-based buffer overflow exist.
+
+### Suumery
+
+- **Stack** → Function calls and local data. Know stack frames, stack exhaustion, and stack-based buffer overflows.
+- **Heap** → Dynamic allocation. Know `malloc()`, `calloc()`, `free()`, memory leaks, use-after-free, and heap-based buffer overflows.
+- **Virtual address space** → The memory addresses a process uses. Know that ASLR randomizes the locations of relevant regions.
+- **Memory protections** → Know ASLR, stack canaries, NX/DEP, and PIE — and understand that these reduce exploitability but do not fix the underlying bug.
