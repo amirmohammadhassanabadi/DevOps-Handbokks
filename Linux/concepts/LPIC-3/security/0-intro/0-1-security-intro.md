@@ -124,6 +124,12 @@ Memory-corruption vulnerabilities can cause:
 - Modification of program state or control flow.
 - Arbitrary code execution under the privileges of the vulnerable process, in some cases.
 
+> An **address space** is the range of memory addresses that a process can use to access its code, data, stack, heap, shared libraries, and other mapped memory regions.
+>
+> On Linux, each process typically has its own virtual address space, which the operating system and CPU's memory-management hardware map to physical memory or other backing storage.
+>
+> *Example:* ASLR randomizes the locations of certain regions within a process's virtual address space, making it harder for an attacker to predict memory addresses needed to exploit a vulnerability.
+
 ### Common Memory-Corruption Bugs
 
 | Bug class | Description |
@@ -136,6 +142,71 @@ Memory-corruption vulnerabilities can cause:
 | *Stack exhaustion* | Excessive stack consumption, often through deep recursion, causes the process to fail. This is distinct from a stack-based buffer overflow. |
 
 Memory corruption is particularly associated with languages that allow direct memory manipulation, such as `C` and `C++`. However, it is not exclusive to these languages.
+
+> ### Buffer
+> A buffer is a temporary area of memory used to hold data while it is waiting to be processed, transferred, or consumed.
+>
+> Think of it like a waiting area: 
+> 1. data arrives
+> 2. waits there for a while 
+> 3. and is then read or processed.
+>
+> Examples in Linux
+> - Buffer in a program: A program receives network data and stores it in memory before processing it.
+> - Kernel ring buffer: The Linux kernel stores log messages in a circular memory buffer. When you run **`dmesg`**, you read messages from this buffer.
+> - I/O buffer: Data is temporarily stored while being read from or written to a device.
+>
+> **Why is it called a ring buffer?**
+> 
+> A ring buffer uses a fixed-size memory area as if its beginning and end were connected in a circle. When the write position reaches the end, it wraps around to the beginning, potentially overwriting older data if the buffer is full.
+>
+> **Remember:** A buffer is the general concept; a ring buffer is one specific type of buffer. A buffer overflow occurs when a program writes beyond the space available in a buffer.
+
+> ## Static memory allocation vs Dynamic memory allocation
+> The main difference is **when memory is allocated**, **how its size is determined**, and **how long it remains allocated**.
+> - ### Static memory allocation
+>   Memory is reserved before the program runs, or as part of a function's fixed-size stack frame when the function is entered.
+>   ```c
+>   int numbers[10];
+>   ```
+> 
+>   Here, numbers has space for 10 integers, and its size is fixed.
+>   - The size is fixed for this array.
+>   - If it is a local variable, it typically exists while the function is executing.
+>   - If it has static storage duration, it exists for the lifetime of the program.
+>
+> - ### Dynamic memory allocation
+>   Memory is requested while the program is running, allowing the program to choose the required size at runtime.
+>
+>   ```c
+>   int *numbers = malloc(10 * sizeof(int));
+>   
+>   if (numbers != NULL) {
+>       /* Use numbers */
+>       free(numbers);
+>   }
+>   ```
+> 
+>   - The size can be determined at runtime.
+>   - The allocated memory remains allocated until it is released with free() or the process terminates.
+>   - The programmer must manage its lifetime correctly in C.
+>
+> ### Comparison
+>
+> | Feature | Static allocation | Dynamic allocation |
+> | --- | --- | --- |
+> | When | Before execution, or at a function's entry for fixed local storage | During execution
+> | Size | Fixed for the object | Can be chosen at runtime
+> | Typical location | Static storage or stack | Heap
+> | Lifetime | Depends on storage duration | Until released or process termination
+> | Management | Usually automatic | Explicit allocation and release in C
+>
+> **Important distinction:** Static allocation does not always mean memory is stored in the static data segment. Local fixed-size arrays are typically stored on the stack, whereas global variables and variables declared with static have static storage duration.
+>
+> **Remember:** Static allocation is suitable when storage requirements and lifetimes are known; dynamic allocation is useful when memory requirements need to be decided at runtime.
+> 
+
+
 
 ### Dynamic Memory Allocation in C
 
@@ -309,3 +380,43 @@ sysctl kernel.randomize_va_space
 - Stack canaries, NX/DEP, PIE, and ASLR provide complementary protections.
 - `kernel.randomize_va_space=2` enables the full-ASLR setting where supported; `0` disables it.
 - Security mitigations reduce risk, but preventing the underlying defect is preferable to relying on exploit mitigations alone.
+
+---
+
+To understand memory corruption, buffer overflows, and ASLR, you should understand how a running program uses memory. Let's focus on the concepts you actually need for Linux security, without going too deep into computer architecture.
+
+## A process's memory layout
+When you run a program, Linux creates a process with its own virtual address space. That address space contains different regions used for different purposes.
+
+### Simplified process memory layout
+
+Conceptual diagram — not to scale; exact layout varies.
+
+```
+---------------------------------------------------------
+|                         Stack                         |
+|   Function calls, local variables, return addresses   |
+---------------------------------------------------------
+                           ↓↑                             
+        May grow or expand toward other regions                                               
+---------------------------------------------------------
+|                 Memory-mapped regions                 |
+|    Shared libraries, mapped files, other mappings     |
+---------------------------------------------------------
+---------------------------------------------------------
+|                         Heap                          |
+|              Dynamically allocated memory             |
+---------------------------------------------------------
+---------------------------------------------------------
+|                     Data and BSS                      |
+|              Global and static variables              |
+---------------------------------------------------------
+---------------------------------------------------------
+|                   Text (code)                         |
+|               Program instructions                    |
+---------------------------------------------------------
+```
+
+Illustrative arrangement only. Modern processes may use different layouts and additional mappings.
+
+The key regions to know are the stack, heap, data/BSS, and text (code). The mapped regions are also relevant to shared libraries and ASLR.
