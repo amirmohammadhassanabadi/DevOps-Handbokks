@@ -143,6 +143,8 @@ Memory-corruption vulnerabilities can cause:
 
 Memory corruption is particularly associated with languages that allow direct memory manipulation, such as `C` and `C++`. However, it is not exclusive to these languages.
 
+> Forgetting to free dynamically allocated memory causes a **memory leak**. It can consume increasing amounts of memory, potentially causing performance degradation or denial of service (DoS) if an attacker can repeatedly trigger the leak. In a long-running process, severe leaks may eventually exhaust available memory.
+
 > ### Buffer
 > A buffer is a temporary area of memory used to hold data while it is waiting to be processed, transferred, or consumed.
 >
@@ -706,6 +708,10 @@ The key regions to know are the stack, heap, data/BSS, and text (code). The mapp
     - Failing to release memory can cause a memory leak.
     - Accessing memory after releasing it can cause a use-after-free vulnerability.
     - Writing beyond a heap allocation can cause a heap-based buffer overflow.
+
+    > **Memory leak**: Occurs when a program allocates memory but no longer needs it and fails to release it, causing memory usage to grow over time.
+    >
+    > **Memory spraying**: An exploitation technique in which an attacker fills large portions of memory with carefully crafted data to increase the chance that a vulnerability redirects execution to attacker-controlled content.
 
     ### Stack vs. heap
     | Feature | Stack | Heap |
