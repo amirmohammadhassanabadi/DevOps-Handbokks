@@ -461,6 +461,25 @@ sysctl kernel.randomize_va_space
 
 **Security warning:** Setting this parameter to `0` weakens exploit mitigations. Do not disable ASLR on a production system merely to make a demonstration work.
 
+## KASLR (Kernel Address Space Layout Randomization)
+
+KASLR randomizes the memory location where the Linux kernel is loaded, making it harder for an attacker to predict kernel addresses and exploit vulnerabilities that depend on knowing those addresses.
+
+### Are ASLR and KASLR features of the CPU or the kernel?
+
+Primarily, they are operating-system security features, not CPU features.
+
+| Component | Role |
+| --- | --- |
+| Kernel / OS | Implements ASLR and KASLR by randomizing memory locations. |
+| CPU / hardware | Provides mechanisms such as virtual memory and memory protection that the OS uses. |
+| Compiler and linker | Build user-space programs with support for position-independent execution (PIE), which helps ASLR randomize executable code locations. |
+
+- ASLR randomizes locations in a process's virtual address space, such as the stack, heap, shared libraries, and - when supported by PIE - the executable itself.
+- KASLR randomizes the kernel's load location.
+
+On Linux, ASLR is commonly controlled through `/proc/sys/kernel/randomize_va_space`. KASLR support and configuration depend on the kernel build, boot options, and platform.
+
 ## 6. Key Takeaways
 
 - The CIA triad represents confidentiality, integrity, and availability.
@@ -872,3 +891,206 @@ This is why the terms stack-based buffer overflow and heap-based buffer overflow
 - **Heap** → Dynamic allocation. Know `malloc()`, `calloc()`, `free()`, memory leaks, use-after-free, and heap-based buffer overflows.
 - **Virtual address space** → The memory addresses a process uses. Know that ASLR randomizes the locations of relevant regions.
 - **Memory protections** → Know ASLR, stack canaries, NX/DEP, and PIE — and understand that these reduce exploitability but do not fix the underlying bug.
+
+---
+
+## CPU register
+
+A CPU register is a very small, extremely fast storage location inside the processor that holds data, memory addresses, or information needed while instructions execute.
+
+Think of RAM as a workspace and CPU registers as the tiny storage spaces directly on your desk: the CPU uses them to access important information quickly without repeatedly fetching it from RAM.
+
+**Example:**
+
+Consider this C code:
+
+```c
+int a = 10;
+int b = 20;
+int c = a + b;
+```
+
+Conceptually, the CPU might load `a` and `b` into registers, add their values, and store the result `30` in a register before writing it to memory if necessary. The compiler and CPU determine the actual instructions and register usage.
+
+### Common CPU registers on x86-64
+
+| Register | Simplified purpose |
+| --- | --- |
+| **RAX** | Often holds arithmetic results or function return values |
+| **RBX** | General-purpose storage |
+| **RCX, RDX** | General-purpose storage; also used for certain instruction and calling-convention purposes |
+| **RSP** | Stack pointer: points to the current top of the stack |
+| **RBP** | Often used as a base/frame pointer to reference a function's stack frame |
+| **RIP** | Instruction pointer: identifies the next instruction to execute |
+
+These are 64-bit register names on x86-64. Other CPU architectures have different register names and conventions. 
+
+**How does this relate to memory?**
+
+```
+----------------------------------------------------------------
+|                            RAM                               |
+|           Stores program instructions and data               |
+----------------------------------------------------------------
+      ↓↑ Data and addresses move between memory and registers
+----------------------------------------------------------------
+|                        CPU registers                         |
+|  Hold values and addresses the CPU is currently working with |
+----------------------------------------------------------------
+
+```
+
+For your memory-security studies, focus especially on these three registers:
+
+- RSP — Stack Pointer: tracks the current stack position.
+- RBP — Base/Frame Pointer: commonly provides a reference point within a function's stack frame.
+- RIP — Instruction Pointer: tracks which instruction executes next.
+
+These registers help explain function calls, stack frames, return addresses, and why certain memory-corruption vulnerabilities can affect program execution.
+
+## What is the base pointer?
+
+The base pointer is a CPU register commonly used to reference a function's stack frame, making it easier to access local variables and function parameters at known offsets.
+
+On x86-64, this register is called **RBP**; on 32-bit x86, it is called **EBP**.
+
+Conceptually, a function's stack frame might look like this:
+
+```
+---------------------------------------
+| Function parameters                 |
+---------------------------------------
+---------------------------------------
+| Base pointer (RBP)                  |
+| Reference point for the stack frame |
+---------------------------------------
+---------------------------------------
+| Local variables                     |
+---------------------------------------
+
+Illustrative only; actual stack-frame layouts vary.
+```
+
+The base pointer can make stack-frame access easier because variables can be addressed using offsets from it. For example, a local variable might be accessed at a negative offset from RBP.
+
+**Important distinction:** The base pointer is a CPU register, not a memory region. Modern compilers often omit the frame pointer and use the stack pointer (RSP) or other methods instead.
+
+### Why it matters for buffer overflows
+
+In some stack layouts, overflowing a local buffer can corrupt saved frame-pointer data and potentially a saved return address. However, the exact layout depends on compiler choices, architecture, and security protections.
+
+## RBP vs Return address:
+
+The confusion makes sense because RBP and the return address are both related to function calls, but they serve two completely different purposes.
+
+- **RBP (base/frame pointer)**: Helps a function locate data in its stack frame.
+- **Return address**: Tells the CPU where to continue executing after the function finishes.
+
+Let's use an example
+
+```c
+int main(void)
+{
+    calculate();
+    printf("Done");
+}
+
+void calculate(void)
+{
+    int x = 10;
+}
+```
+
+When `main()` calls `calculate()`, the CPU needs to remember where to resume after calculate() finishes: at the instruction that prints `"Done"`.
+That location is the **return address**.
+
+Meanwhile, `calculate()` may use RBP as a reference point to access its local variable `x`.
+
+### Conceptual stack frame
+
+```
+------------------------------------------------------------------------------------
+| Return address                                                                   |
+| Where execution should resume in main()                                          |
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+| Saved RBP value (if used)                                                        |
+| The previous function's frame-pointer value, saved when establishing a new frame |
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+| Local variable x                                                                 |
+| Data belonging to calculate()                                                    |
+------------------------------------------------------------------------------------
+
+Illustrative stack layout, not an exact layout for every compiler or architecture.
+```
+
+Notice that the saved RBP value is not the same thing as the current RBP register. If a function uses a frame pointer, it may save the caller's previous RBP value in memory and then set RBP to reference its own stack frame.
+
+### Why do we need both?
+
+Imagine a book:
+
+- Return address = bookmark: tells you where to resume reading after you temporarily switch to another chapter.
+- RBP = reference point within the chapter: helps you find specific information within that chapter.
+
+A bookmark doesn't tell you where a particular paragraph is, and a reference point within a chapter doesn't tell you which page to return to after reading another chapter.
+
+**One final detail:** RBP is optional. Modern compilers often omit it and use other methods to access local data. Functions still need a way to return to their callers, so return-address handling is a separate requirement. On x86-64, a normal `call`/`ret` sequence typically stores and retrieves the return address using the stack, regardless of whether RBP is used.
+
+---
+
+### if RBP is in  CPU, how affects on Memory?
+
+The key is that a CPU register and a memory location are two different places, and information can move between them.
+
+Let's use RBP and a return address as examples.
+
+### The base pointer is a CPU register
+
+RBP physically exists inside the CPU. It holds a value, usually a memory address that refers to a location in the current function's stack frame.
+
+For example:
+```
+-----------------------------------------------------------------
+| Inside the CPU                                                |
+| Register RBP                                                  |
+| 0x7FFF1000                                                    |
+| Contains a memory address                                     |
+-----------------------------------------------------------------
+          ↓ Address refers to a location in memory
+-----------------------------------------------------------------
+| In RAM (conceptual)                                           |
+| Stack memory at 0x7FFF1000                                    |
+| Contains stack-frame data, depending on the program's layout. |
+-----------------------------------------------------------------
+```
+
+The register itself is not in RAM. It simply holds an address that refers to memory.
+
+### What about the return address?
+
+When a function is called, the CPU must know where execution should resume after that function finishes.
+On x86-64, a call instruction normally does two things:
+
+- Saves the address of the instruction that should execute after the function call. The CPU pushes this return address onto the stack.
+- Transfers execution to the called function.
+
+When the function returns, the `ret` instruction normally takes the return address from the stack and transfers execution back to that location.
+
+So the return address is typically stored in stack memory, while **`RSP`** tracks the current stack position.
+
+### The important distinction
+
+| Item | Where is it? | What does it do? |
+| --- | --- | --- |
+| RBP | Inside the CPU | Holds a value, commonly an address referencing a stack frame |
+| RSP | Inside the CPU | Holds the current stack pointer |
+| Return address | Typically in stack memory after a call | Identifies where execution should resume |
+| Local variable | Depends on compiler and program | Holds application data |
+
+**One nuance:** the return address is not always stored on the stack on every CPU architecture. On x86-64, the `call`/`ret` mechanism normally uses the stack, while other architectures may initially keep the return address in a dedicated register.
+
+**The takeaway:** registers hold values inside the CPU; memory holds values at memory addresses. A register can contain an address pointing to data in memory, and the CPU can copy values between registers and memory.
+
+---
