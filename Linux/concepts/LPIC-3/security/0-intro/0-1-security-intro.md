@@ -282,7 +282,61 @@ Then supply a longer input:
 
 The second invocation attempts to copy 200 `A` characters plus the terminating null byte into a 100-byte buffer. This invokes undefined behavior: the program may crash, corrupt memory, or appear to work despite the bug.
 
-**Do not rely on a crash as proof that the vulnerability exists or that it has been fixed.**
+
+In our buffer overflow example, when the user entered more than 100 characters, the program could crash and display:
+
+```bash
+Segmentation fault (core dumped)
+```
+
+However, a buffer overflow does not always cause a segmentation fault. Let's understand both terms.
+
+### Segmentation fault
+
+A segmentation fault (SIGSEGV) occurs when a program attempts an invalid memory access, such as writing to memory it is not permitted to modify or accessing an unmapped memory address.
+
+In our example:
+
+```c
+char buf[100];
+strcpy(buf, argv[1]);
+```
+
+`strcpy()` copies the input into buf without checking whether it fits. If the input exceeds the buffer's capacity, it writes beyond the array's boundaries, causing undefined behavior.
+
+Possible outcomes include:
+- The program crashes with a segmentation fault.
+- Other memory is corrupted, but the program continues running.
+- The program behaves unpredictably.
+- Under certain conditions, the overflow can be exploited.
+
+**Why doesn't it always crash?** Because the memory immediately beyond the buffer might still be **mapped** and **writable**. The operating system may not detect the invalid array-bound access itself.
+
+### Core dumped
+
+A core dump is a snapshot of a process's state when it terminates abnormally. It can contain information such as memory contents, CPU registers, and thread state, depending on the system configuration.
+
+Developers can use it to investigate crashes with debugging tools such as GDB:
+
+```bash
+gdb ./vulnerable_program core
+```
+
+The exact command depends on how the core dump was generated and where it was saved.
+
+A core dump is not the crash itself; it is a diagnostic artifact that may be produced after the crash.
+
+### Why do we see this message?
+| Message | Meaning |
+| --- | --- |
+| Segmentation fault | The process received SIGSEGV, typically because of an invalid memory access. |
+| core dumped | A core dump was produced, or the system reported that one was produced. |
+
+Core dumps may be disabled or restricted by system settings, so a segmentation fault does not guarantee that a core file will be created.
+
+**Security takeaway:** A buffer overflow is an out-of-bounds write; a segmentation fault is one possible consequence. A crash can reveal a bug, but an overflow can also corrupt memory or enable code execution without crashing immediately.
+
+> **Do not rely on a crash as proof that the vulnerability exists or that it has been fixed.**
 
 The example is intentionally vulnerable and should be used only in an isolated lab. Do not run untrusted exploit inputs against production systems.
 
@@ -308,6 +362,42 @@ Modern systems can apply several complementary defenses:
 These protections reduce exploitability; they do not eliminate the underlying programming error.
 
 The preferred fix is to correct the code - for example, validate input length and use an appropriate bounded operation with correct handling of the destination capacity. Simply replacing `strcpy()` with another function does not automatically make code safe if its bounds and termination rules are handled incorrectly.
+
+> ### stack canary
+> In Linux, a stack canary is a security mechanism that helps detect stack buffer overflows before they can corrupt critical control information, such as a function's return address.
+>
+> **How it works**
+>
+> 1. **Canary placed:** A special value is placed in a function's stack frame, typically between vulnerable local buffers and control-related data.
+> 2. **Buffer overflow occurs:** If an overflow overwrites memory beyond a local buffer, it may also overwrite the canary.
+> 3. **Canary checked:** Before the function returns, generated protection code checks whether the canary has changed.
+> 4. **Failure detected:** If the value differs, the program aborts rather than returning normally.
+>
+> **What does “canary in the kernel” mean?**
+>
+> The Linux kernel can also use stack-protector mechanisms. When enabled, the compiler inserts canary checks into selected kernel functions, just as it does for ordinary applications.
+>
+> If a kernel canary check fails, the kernel detects possible stack corruption and typically triggers a kernel panic or another fatal failure path, depending on the architecture and implementation.
+>
+> **Important limitations:**
+> - A canary detects certain overwrites; it does not prevent them.
+> - An overflow may corrupt data without changing the canary.
+> - An attacker who can bypass or predict the canary may evade this protection.
+>
+> **Remember:** A stack canary is a detection mechanism, not a fix for the underlying buffer overflow.
+
+> ### DEP
+> DEP (Data Execution Prevention) is a security mechanism that prevents a memory region intended for data, such as the stack or heap, from being executed as machine code.
+>
+> It commonly uses the CPU's **NX** (No-eXecute) bit or XD (Execute Disable) bit to mark memory pages as non-executable.
+>
+> **NX** will be activated on CPU or better to say, NX is one the **CPU's features**.
+>
+> you can check it in **`/proc/cpuinfo`** in the **`flags`** values or you can see it with `dmesg | grep -i nx`
+>
+> **Purpose:** Mitigates attacks that inject and execute malicious code in data memory, such as certain buffer overflow exploits.
+>
+> **Limitation:** DEP does not prevent an attacker from reusing existing executable code, as in Return-Oriented Programming (ROP).
 
 ---
 
