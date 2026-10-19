@@ -107,10 +107,34 @@ On Fedora, RHEL, Rocky Linux, AlmaLinux, and other DNF-based systems, DNF manage
 - `dnf update --security` → Applies applicable security-related package updates identified by the available advisory metadata.
 - `dnf update` → Updates installed packages for which newer applicable versions are available.
 
+> when you run `dnf updateinfo list --security`, you see prefixes like **RHSA** or **RLSA**:
+>
+> These prefixes identify the type of security advisory published by the distribution:
+>
+> - **RHSA** — Red Hat Security Advisory.
+> - **RLSA** — Rocky Linux Security Advisory.
+> - **DBSA** — Debian Security Advisory.
+>
+> They identify which distribution or vendor issued the advisory. The advisory contains details about the security issue and the packages affected.
+
 **Important:** Security-filtered updates depend on correctly maintained repository advisory metadata. They do not guarantee that every vulnerability on the machine will be identified or fixed. Regular full updates, appropriate repository configuration, and vulnerability assessment remain important.
 
 For production systems, test updates where appropriate, plan for service restarts or reboots, and verify that the expected package versions and security fixes are installed.
 
+> ### CVSS
+> CVSS (Common Vulnerability Scoring System) is a standardized system for rating the severity of security vulnerabilities on a scale from `0.0` to `10.0`.
+>
+> | Score | Severity |
+> | --- | --- |
+> | 0.0 | None |
+> | 0.1–3.9 | Low |
+> | 4.0–6.9 | Medium |
+> | 7.0–8.9 | High |
+> | 9.0–10.0 | Critical |
+> 
+> CVSS evaluates factors such as how a vulnerability can be exploited and its potential impact on confidentiality, integrity, and availability.
+> 
+> **Important:** CVSS measures technical severity, not the actual risk to a particular organization. Real-world risk also depends on factors such as exposure, existing mitigations, and the importance of the affected system.
 ---
 
 ## Memory Corruption
@@ -207,8 +231,6 @@ Memory corruption is particularly associated with languages that allow direct me
 >
 > **Remember:** Static allocation is suitable when storage requirements and lifetimes are known; dynamic allocation is useful when memory requirements need to be decided at runtime.
 > 
-
-
 
 ### Dynamic Memory Allocation in C
 
