@@ -731,3 +731,51 @@ Gateway API groups features into support levels:
 - **Implementation-specific**: behavior depends on the implementation.
 
 These levels describe the API's conformance expectations, not a guarantee that every filter works identically in every controller version.
+
+---
+
+## BackendRefs, ReferenceGrant, and Traffic Splitting
+
+An `HTTPRoute` determines how a request is matched and where it should be sent. The `backendRefs` field identifies the backend destinations that receive matching traffic.
+
+Keep three separate concepts in mind:
+
+- **Backend selection:** Which Service should receive the request?
+- **Reference permissions:** Is the Route allowed to reference that backend?
+- **Traffic distribution:** If there are multiple backends, how should requests be distributed between them?
+
+### How backendRefs works
+
+A backend reference usually points to a Kubernetes Service.
+
+```yaml
+backendRefs:
+  - name: orders-service
+    port: 8080
+```
+
+This tells the controller to send matching traffic to port 8080 of the Service named orders-service.
+
+If namespace is omitted, the backend is assumed to be in the same namespace as the HTTPRoute. You can specify namespace to reference a Service in another namespace, but that introduces additional permission requirements.
+
+A simplified request flow is:
+
+```
+Client
+  |
+  v
+Gateway / Envoy
+  |
+  v
+HTTPRoute
+  |
+  | backendRefs
+  v
+Kubernetes Service
+  |
+  v
+Service endpoints (typically Pod IPs)
+```
+
+
+The Service provides a stable backend abstraction. The Gateway implementation resolves and configures the actual destinations; the request does not necessarily pass through the Service's ClusterIP as a separate network hop.
