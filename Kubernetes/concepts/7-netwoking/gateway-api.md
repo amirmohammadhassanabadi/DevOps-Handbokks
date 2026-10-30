@@ -744,7 +744,7 @@ Keep three separate concepts in mind:
 - **Reference permissions:** Is the Route allowed to reference that backend?
 - **Traffic distribution:** If there are multiple backends, how should requests be distributed between them?
 
-### How backendRefs works
+### How `backendRefs` works
 
 A backend reference usually points to a Kubernetes Service.
 
@@ -777,5 +777,158 @@ Kubernetes Service
 Service endpoints (typically Pod IPs)
 ```
 
-
 The Service provides a stable backend abstraction. The Gateway implementation resolves and configures the actual destinations; the request does not necessarily pass through the Service's ClusterIP as a separate network hop.
+
+### Cross-namespace backends and ReferenceGrant
+
+Kubernetes namespaces provide organizational and access-control boundaries. A Route in one namespace should not automatically be able to expose a Service owned by another namespace.
+
+Suppose the resources are organized like this:
+
+```
+Namespace: edge
+  └── HTTPRoute: public-api
+                    |
+                    | backendRef
+                    v
+Namespace: applications
+  └── Service: orders-service
+```
+
+The Route can specify the backend namespace explicitly:
+
+```yaml
+backendRefs:
+  - name: orders-service
+    namespace: applications
+    port: 8080
+```
+
+
+But this reference alone is insufficient. 
+
+> **The owner of the target namespace must explicitly permit the cross-namespace reference using a ReferenceGrant resource in the target namespace**
+
+### How `ReferenceGrant` works
+
+A `ReferenceGrant` identifies:
+
+- **`from`**: the kinds of resources and source namespace permitted to make references.
+- **`to`**: the kinds of resources that can be referenced in the namespace containing the grant.
+
+For our example, the grant belongs in `applications`, not `edge`:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: allow-edge-routes
+  namespace: applications
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: edge
+  to:
+    - group: ""
+      kind: Service
+```
+
+This permits `HTTPRoute` resources in `edge` to reference **Services** in `applications`. It does not grant access to every kind of resource, and it does not allow Routes from every namespace.
+
+Notice that the grant does not specify a Service name. Its to section grants permission by resource kind, so the grant applies to Services in the target namespace, subject to the specified source restrictions.
+
+**Security principle:** the owner of the referenced resource controls whether cross-namespace references to that resource type are allowed. A Route author cannot grant themselves this permission simply by editing their own Route.
+
+**What happens if the ReferenceGrant is missing?**
+
+The cross-namespace backend reference is invalid. The controller should report the unresolved reference in the Route's status, typically through the `ResolvedRefs` condition with reason `RefNotPermitted`. Traffic to that backend cannot be forwarded as intended. The precise observable failure depends on the implementation and configuration.
+
+Do not confuse two different cross-namespace relationships:
+
+| Relationship | Main permission mechanism |
+| --- | --- |
+| `HTTPRoute` attaching to a Gateway in another namespace | Gateway listener's `allowedRoutes` |
+| `HTTPRoute` referencing a Service in another namespace | `ReferenceGrant` in the Service's namespace |
+| Gateway referencing a TLS Secret in another namespace | `ReferenceGrant` in the Secret's namespace |
+
+These mechanisms protect different boundaries.
+
+### Traffic splitting with backend weights
+
+One Route rule can reference multiple backends. The weight field defines the relative proportion of requests sent to each backend.
+
+For example, suppose you have two versions of an application:
+
+- `orders-v1`: existing stable version
+- `orders-v2`: new version being introduced
+
+You can configure the Route to send approximately 90% of traffic to `v1` and 10% to `v2`.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: orders-route
+spec:
+  parentRefs:
+    - name: public-gateway
+  hostnames:
+    - shop.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /orders
+      backendRefs:
+        - name: orders-v1
+          port: 8080
+          weight: 90
+        - name: orders-v2
+          port: 8080
+          weight: 10
+```
+
+
+The distribution is calculated as:
+
+$$
+\text{Backend share} = \frac{\text{backend weight}}{\text{sum of all backend weights}}
+$$
+
+Here, the total weight is `90+10=100`, so the configured proportions are 90% and 10%. The sum does not have to equal 100; **weights are relative values**, not inherently percentages. 
+
+For example, weights of `9` and `1` express the same ratio as `90` and `10`.
+
+**Important details:**
+
+- If a backend's weight is omitted, it defaults to 1.
+- A weight of 0 means that backend should receive no traffic.
+- Traffic distribution is approximate over finite numbers of requests; you should not expect exactly 10 out of every 100 requests to reach v2.
+- Traffic splitting does not itself perform health analysis, automatically roll back a deployment, or guarantee application-level availability.
+- Both backend Services must be configured correctly, and the controller must support the relevant behavior.
+
+This is a core Gateway API capability for `HTTPRoute` implementations conforming to the relevant standard. 
+
+### Backend errors and status conditions
+
+A Route may be accepted while its backend reference is invalid or unavailable. Always distinguish configuration status from actual application health.
+
+Useful concepts include:
+
+- `Accepted` — whether the Route was accepted for processing by the relevant parent.
+- `ResolvedRefs` — whether references such as backend Services can be resolved and are permitted.
+- Backend readiness and health — whether the actual application endpoints can serve requests successfully.
+For example, a missing Service, wrong Service port, or missing cross-namespace grant can prevent successful forwarding even when the Route itself exists.
+
+For a Kubernetes Service backend, the port in `backendRefs` refers to the Service port, not the Pod's targetPort.
+
+If the Service defines:
+
+```yaml
+ports:
+  - port: 8080
+    targetPort: 5000
+```
+
+then the Route should reference port `8080`. Kubernetes maps that Service port to the target port for the selected endpoints.
