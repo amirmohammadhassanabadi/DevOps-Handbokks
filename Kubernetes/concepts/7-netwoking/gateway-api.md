@@ -1682,3 +1682,129 @@ Do not confuse the eBPF interception with the actual HTTP routing. eBPF handles 
 - Cilium uses TPROXY to forward incoming traffic to Envoy.
 
 ---
+
+# Cilium Gateway API Architecture
+
+When you create a Gateway and an HTTPRoute, Kubernetes stores those resources. They do not directly forward packets. Cilium's control-plane components interpret the resources, translate them into proxy configuration, and configure Envoy. Cilium's networking data plane then directs traffic to the proxy, and Envoy applies the HTTP routing rules.
+
+Cilium's official documentation describes this flow as the Cilium operator validating Gateway API resources and translating them into Cilium Envoy Configuration resources, followed by the Cilium agent supplying the configuration to Envoy.
+
+The main components are:
+
+- ### Kubernetes API server
+
+  **Stores the desired configuration:** `GatewayClass`, `Gateway`, `HTTPRoute`, `Service`, `ReferenceGrant`, and related resources. It is the source of truth for the declared configuration, not the component that proxies HTTP requests.
+
+- ### Cilium operator — Gateway API reconciliation
+
+  Watches Gateway API resources, checks whether they are valid and can be accepted, and translates them into Cilium Envoy Configuration resources. It also updates resource status conditions to report the result of reconciliation.
+
+- ### Cilium agent (`cilium-agent`)
+
+  Runs on each node. It manages node-level Cilium networking, including eBPF datapath configuration, and picks up the generated Envoy configuration resources so the appropriate proxy can be configured.
+
+- ### Envoy proxy
+
+  Processes application traffic at Layer 7. It handles HTTP host/path/header matching, supported filters, TLS termination when configured, and forwarding requests to the selected backend.
+
+- ### eBPF datapath and Linux networking
+
+  Handle packet-level networking and relevant service redirection and policy enforcement. For Cilium Gateway traffic, the datapath works with TPROXY to steer traffic to Envoy, rather than having eBPF itself evaluate every HTTP path rule.
+
+
+These components cooperate but have different responsibilities. The Cilium operator is not the traffic proxy, and eBPF does not replace Envoy's HTTP-routing functionality.
+
+In particular, the Cilium operator is not the proxy, and Envoy is not the Kubernetes Gateway API controller.
+
+## Configuration Flow
+
+Consider these resources:
+
+- **`GatewayClass`**: selects Cilium as the implementation.
+- **`Gateway`**: declares an HTTPS listener.
+- **`HTTPRoute`**: sends `/api` requests to a backend Service.
+- **`Service`**: identifies the backend application endpoints through Kubernetes service discovery.
+
+The configuration lifecycle follows this general sequence:
+
+1. An administrator or application team creates or modifies resources such as `GatewayClass`, `Gateway`, `HTTPRoute`, and `Service`.
+2. Kubernetes stores the desired state in the API server.
+3. The Cilium operator watches and reconciles Gateway API resources, checks their validity, updates status conditions, and generates Cilium Envoy Configuration resources.
+4. The Cilium agent picks up the generated configuration resources.
+5. The agent supplies the appropriate configuration to Envoy.
+6. Envoy applies the resulting configuration to incoming traffic.
+
+This is a continuously reconciled control-plane process, not a sequence that runs from the beginning for every incoming request. Envoy processes requests using its active configuration rather than querying the Kubernetes API server for each request.
+
+A resource's existence does not prove that its configuration has been accepted, its references resolved, or its data plane programmed successfully.
+
+## Request Processing Flow
+
+Consider a client requesting `https://shop.example.com/api/orders`.
+
+
+
+1. **External delivery:** DNS, routing, firewalls, and any external WAF or load balancer deliver traffic to the exposed Gateway endpoint.
+2. **Traffic steering:** Cilium networking directs the connection to Envoy. The exact path depends on the Gateway exposure mode.
+3. **TLS handling:** For an HTTPS listener using TLS termination, Envoy completes the TLS handshake and decrypts the HTTP request. With TLS passthrough, Envoy forwards the encrypted stream according to the supported TLS routing configuration instead.
+4. **HTTP routing:** Envoy evaluates the active configuration, including hostnames, HTTPRoute matches, and applicable filters.
+5. **Backend selection:** Envoy selects the configured backend and forwards the request to a backend endpoint.
+6. **Network delivery and policy:** Cilium networking and policy mechanisms handle the relevant traffic delivery and enforcement.
+7. **Response:** The backend response returns through the proxying and networking path. For TLS termination, Envoy manages the client-facing TLS connection.
+
+The steps describe the logical processing flow; they do not necessarily correspond to separate physical network hops.
+
+## 4. eBPF, TPROXY, and Envoy
+
+These technologies have different responsibilities.
+
+| Component | Responsibility |
+|---|---|
+| eBPF | Implements parts of Cilium's kernel-level networking, service handling, and policy datapath. |
+| TPROXY | Provides transparent traffic redirection to a proxy while preserving connection properties required by the proxy. |
+| Envoy | Processes Layer 7 traffic, including HTTP routing, supported filters, and TLS termination. |
+| Cilium agent | Manages node-level networking and supplies proxy configuration. |
+| Cilium operator | Reconciles Gateway API resources and generates configuration resources. |
+
+Cilium's Gateway API implementation uses TPROXY to steer traffic to Envoy. In the documented default configuration, `bpf.tproxy=false`, TPROXY uses iptables and requires the relevant netfilter modules. The alternative `bpf.tproxy=true` provides an eBPF-based implementation and is documented as beta in the referenced Cilium release.
+
+**Important:** It is inaccurate to say that eBPF performs all Gateway API HTTP routing. eBPF and Linux networking handle packet-level operations and redirection; Envoy evaluates HTTP-level routing rules and applies supported Layer 7 filters.
+
+Cilium Gateway API requires kube-proxy replacement (`kubeProxyReplacement=true`) and the L7 proxy (`l7Proxy=true`).
+
+## 5. Envoy Deployment Models
+
+Cilium supports two Envoy deployment models:
+
+- **Embedded mode:** Envoy runs as a process within the `cilium-agent` Pod on each node.
+- **Standalone mode:** Envoy runs in a separate `cilium-envoy` DaemonSet.
+
+In both models, Envoy handles the relevant Layer 7 traffic on the node. The deployment model affects operational and security configuration details.
+
+Do not assume that every Gateway resource creates a dedicated Envoy Pod. Cilium's proxy infrastructure can handle configuration for multiple Gateway listeners and routes.
+
+## 6. Exposure and Traffic Redirection
+
+Cilium Gateway API commonly exposes its proxy through a `LoadBalancer` Service. Depending on the environment and configuration, NodePort or host-network exposure may be used instead.
+
+With Service-based exposure, traffic arriving at the Gateway Service is transparently forwarded to Envoy using TPROXY.
+
+With host-network exposure, Gateway listeners are exposed on selected node network interfaces and ports. Host-network mode changes how the listener is exposed; it does not replace Envoy as the Layer 7 proxy.
+
+Listener configuration alone does not guarantee external reachability. Routing, firewall rules, WAF or load-balancer configuration, and node availability must also be considered.
+
+## 7. Troubleshooting the Configuration Lifecycle
+
+When Gateway traffic fails, check the following separately:
+
+1. **Resource acceptance:** Is the Gateway or HTTPRoute accepted? Inspect status conditions.
+2. **Reference resolution:** Are the referenced Services, Secrets, and other resources found and permitted? Inspect `ResolvedRefs` and related conditions.
+3. **Gateway programming:** Is the Gateway successfully programmed? Inspect its `Programmed` condition and reported addresses.
+4. **Proxy configuration:** Has the intended configuration reached Envoy?
+5. **External reachability:** Can the client or WAF reach the configured Gateway endpoint and port?
+6. **Backend delivery:** Is the selected Service and its endpoint reachable, and does Cilium policy permit the traffic?
+7. **TLS correctness:** If HTTPS is involved, check listener configuration, certificates, hostname compatibility, and backend TLS requirements where applicable.
+
+A successful resource status does not, by itself, prove that external networking, backend connectivity, and application behavior are all working.
+
+---
