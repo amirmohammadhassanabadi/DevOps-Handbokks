@@ -68,7 +68,197 @@ Gateway API defines several listener protocols.
 
 The available Route kinds and protocol combinations depend on the Gateway API specification and implementation support.
 
-For our Cilium learning path, HTTP and HTTPS listeners are especially important because they are central to HTTP application exposure.
+> ### TCPRoute
+> 
+> `TCPRoute` routes TCP connections to backend Services.
+> 
+> Unlike **`TLSRoute`**, it does not inspect TLS SNI or other application-level information. It simply forwards `TCP` connections received on a listener to the configured backend.
+> 
+> For example, imagine you have an application that listens on `TCP` port `9000`.
+> 
+> You want clients to connect to the Gateway on port `9000`, and the Gateway should forward those connections to the application Service.
+>
+> **Example**
+>
+>```yaml
+> apiVersion: gateway.networking.k8s.io/v1
+> kind: Gateway
+> metadata:
+>   name: tcp-gateway
+>   namespace: edge
+> spec:
+>   gatewayClassName: cilium
+>   listeners:
+>     - name: tcp-app
+>       protocol: TCP
+>       port: 9000
+>       allowedRoutes:
+>         kinds:
+>           - kind: TCPRoute
+>         namespaces:
+>           from: Same
+> ---
+> apiVersion: gateway.networking.k8s.io/v1alpha2
+> kind: TCPRoute
+> metadata:
+>   name: tcp-app-route
+>   namespace: edge
+> spec:
+>   parentRefs:
+>     - name: tcp-gateway
+>       sectionName: tcp-app
+>   rules:
+>     - backendRefs:
+>         - name: tcp-application
+>           port: 9000
+> ```
+> 
+> **Traffic flow:**
+>
+> ```
+> ┌─────────────────────────────────────────────────────────────────┐
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                          TCP Client                           ||
+> ||                   Connects to Gateway :9000                   ||
+> |└───────────────────────────────────────────────────────────────┘|
+> |                                ↓                                |
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                          tcp-gateway                          ||
+> ||                       TCP listener :9000                      ||
+> |└───────────────────────────────────────────────────────────────┘|
+> |                                ↓                                |
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                        tcp-application                        ||
+> ||                         Service :9000                         ||
+> |└───────────────────────────────────────────────────────────────┘|
+> └─────────────────────────────────────────────────────────────────┘
+> ```
+> 
+> **Important TCPRoute limitation**
+>
+> `TCPRoute` has no hostname, path, or header matching.
+> 
+> Suppose you have two TCP applications:
+> - Application `A` listens on Service port `9000`.
+> - Application `B` listens on Service port `9001`.
+>
+> You generally need separate Gateway listeners with separate ports and a corresponding Route for each application.
+> 
+> You cannot use `TCPRoute` to inspect the application protocol and decide which backend should receive a connection on the same listener.
+> 
+> That is one of the reasons `TLSRoute` exists: it can distinguish TLS connections using **SNI**.
+>
+> ---
+>
+> ### UDPRoute
+>
+> `UDPRoute` routes UDP traffic from a Gateway listener to backend Services.
+> 
+> **UDP** is connectionless, unlike TCP. There is no TCP three-way handshake or persistent TCP connection to forward.
+> 
+> > A common example is **DNS traffic**.
+> 
+> Imagine you have a DNS server running inside Kubernetes and want to forward UDP port `5300` from the Gateway to that DNS Service.
+>
+> **Example**
+>
+> ```yaml
+> apiVersion: gateway.networking.k8s.io/v1
+> kind: Gateway
+> metadata:
+>   name: udp-gateway
+>   namespace: edge
+> spec:
+>   gatewayClassName: cilium
+>   listeners:
+>     - name: dns
+>       protocol: UDP
+>       port: 5300
+>       allowedRoutes:
+>         kinds:
+>           - kind: UDPRoute
+>         namespaces:
+>           from: Same
+> ---
+> apiVersion: gateway.networking.k8s.io/v1alpha2
+> kind: UDPRoute
+> metadata:
+>   name: dns-route
+>   namespace: edge
+> spec:
+>   parentRefs:
+>     - name: udp-gateway
+>       sectionName: dns
+>   rules:
+>     - backendRefs:
+>         - name: dns-server
+>           port: 53
+> ```
+> 
+> **Traffic flow:**
+>
+> ```
+> ┌─────────────────────────────────────────────────────────────────┐
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                          DNS Client                           ||
+> ||                  UDP query to Gateway :5300                   ||
+> |└───────────────────────────────────────────────────────────────┘|
+> |                                ↓                                |
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                          udp-gateway                          ||
+> ||                       UDP listener :5300                      ||
+> |└───────────────────────────────────────────────────────────────┘|
+> |                                ↓                                |
+> |┌───────────────────────────────────────────────────────────────┐|
+> ||                          dns-server                           ||
+> ||                        Service :53/UDP                        ||
+> |└───────────────────────────────────────────────────────────────┘|
+> └─────────────────────────────────────────────────────────────────┘
+> ```
+> 
+> Notice that the Gateway listener port and backend Service port are different:
+> - Gateway receives traffic on UDP `5300`.
+> - Backend Service receives traffic on UDP `53`.
+>
+> The Route connects these two ports.
+> 
+> The Service must expose UDP port 53, for example:
+>
+> ```yaml
+> ports:
+>   - name: dns
+>     protocol: UDP
+>     port: 53
+>     targetPort: 53
+> ```
+>
+> ---
+>
+> ### Cilium-specific compatibility
+>
+> There is an important implementation detail here.
+> 
+> According to the Cilium 1.20 documentation:
+>
+> | Resource | Cilium support | Additional requirement |
+> | --- | --- | --- |
+> | TLSRoute | Supported | Gateway API TLSRoute CRD |
+> | TCPRoute | Supported | Optional TCPRoute CRD |
+> | UDPRoute | Supported | Optional UDPRoute CRD |
+> 
+> **`Cilium 1.20`** supports all three, but `TCPRoute` and `UDPRoute` require their optional CRDs to be installed. 
+> 
+> You can check whether the CRDs exist:
+>
+> ```bash
+> kubectl get crd tlsroutes.gateway.networking.k8s.io
+> kubectl get crd tcproutes.gateway.networking.k8s.io
+> kubectl get crd udproutes.gateway.networking.k8s.io
+> ```
+> 
+> > One limitation to remember: **Cilium Gateway API host network mode is not compatible with `TCPRoute` and `UDPRoute`.** If you use those two Route types, you need to account for their generated Service exposure instead. 
+>
+
 
 ## TLS termination: what actually happens?
 
@@ -484,5 +674,370 @@ For TLS passthrough:
 - The backend terminates TLS.
 
 **One operational detail:** with Cilium's TLS passthrough implementation, the backend sees Envoy's source IP for the forwarded TCP connection, rather than necessarily seeing the original client IP at the network layer. 
+
+---
+
+## `BackendTLSPolicy`
+
+`BackendTLSPolicy` is a Gateway API resource that configures TLS encryption and certificate verification between a Gateway implementation and its backend Kubernetes Service.
+
+The key idea is that TLS can be used on both sides of a Gateway:
+1. `Client → Gateway`: TLS protects the connection from the client to the Gateway. This is configured through the Gateway listener.
+2. `Gateway → Backend`: TLS protects the connection from the Gateway to the backend Service. This is where `BackendTLSPolicy` comes in.
+
+These are two separate TLS connections. Configuring HTTPS on your Gateway listener does not automatically mean that traffic from the Gateway to the backend is encrypted.
+
+### Why do we need `BackendTLSPolicy`?
+
+Consider this architecture:
+
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+|                              Client                             |
+|                           HTTPS request                         |
+|                                ↓                                |
+|                          TLS connection 1                       |
+|┌───────────────────────────────────────────────────────────────┐|
+||                         Gateway / Envoy                       ||
+||                      Terminates client TLS                    ||
+|└───────────────────────────────────────────────────────────────┘|
+|                               ↓                                 |
+|              Backend TLS not automatically enabled              |
+|┌───────────────────────────────────────────────────────────────┐|
+||                         Backend Service                       ||
+||                           Application                         ||
+|└───────────────────────────────────────────────────────────────┘|
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Without backend TLS configuration, the Gateway may terminate HTTPS and forward the request to the backend using plain HTTP.
+
+**For example:**
+
+```
+Client (HTTPS) → Gateway (HTTP) → Backend
+```
+
+This is called **TLS termination at the Gateway**.
+
+It is a perfectly valid architecture in some environments, but it means the Gateway-to-backend connection is not encrypted.
+
+If you want encryption on that connection too, you can configure:
+
+```
+Client (HTTPS) → Gateway (HTTPS) → Backend
+```
+
+`BackendTLSPolicy` tells the Gateway implementation how to establish and verify that backend TLS connection.
+
+### What does `BackendTLSPolicy` configure?
+
+Its main responsibilities are:
+
+- **TLS hostname**: The hostname the Gateway uses for the backend TLS connection and certificate verification.
+- **Certificate trust**: Which CA certificates the Gateway trusts when verifying the backend's certificate.
+- **Backend selection**: Which Kubernetes Service the policy applies to.
+
+**An important distinction:**
+
+`BackendTLSPolicy` does not configure the frontend listener's TLS certificate. That belongs to `Gateway.spec.listeners[].tls.certificateRefs`.
+
+It also does not issue certificates or renew them. You need an existing backend certificate and an appropriate trust configuration.
+
+### A practical example
+
+Let's extend our previous shop example.
+
+Assume:
+
+- `Gateway`: production-gateway in namespace `edge`.
+- `HTTPRoute`: `shop-route` in namespace `api`.
+- Backend Service: shop-api in namespace `api`.
+- The backend serves HTTPS on Service port `443`.
+- Its certificate is issued by an internal Certificate Authority (CA).
+- The certificate contains `shop-api.internal.example.com` as its DNS identity.
+
+The connection should look like this:
+
+```
+Client
+  |
+  | HTTPS
+  v
+Gateway / Envoy
+  |
+  | HTTPS
+  | SNI: shop-api.internal.example.com
+  | Validates backend certificate using internal CA
+  v
+shop-api Service :443
+  |
+  v
+Backend Pods
+```
+
+### Step-By-Step Implementarion:
+
+- **Step 1 — Prepare the CA certificate**
+
+  The Gateway must trust the CA that issued the backend certificate.
+
+  Create a `ConfigMap` containing the CA certificate:
+
+  ```bash
+  kubectl create configmap shop-api-ca \
+    --from-file=ca.crt=internal-ca.crt \
+    -n api
+  ```
+
+  The `ConfigMap` contains the CA's public certificate, not the backend's private key.
+
+- **Step 2 — Create `BackendTLSPolicy`**
+
+  ```yaml
+  apiVersion: gateway.networking.k8s.io/v1
+  kind: BackendTLSPolicy
+  metadata:
+    name: shop-api-backend-tls
+    namespace: api
+  spec:
+    targetRefs:
+      - group: ""
+        kind: Service
+        name: shop-api
+
+    validation:
+      hostname: shop-api.internal.example.com
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: shop-api-ca
+  ```
+
+  This policy targets the `shop-api` Service. It tells the Gateway implementation to use TLS when connecting to that backend and validate the backend's certificate.
+
+- **Step 3 — Update the `HTTPRoute` backend port**
+
+  Our earlier `HTTPRoute` used Service port `8080`. For this example, the backend Service now exposes **HTTPS** on port `443`, so update the API rule:
+
+  ```yaml
+  backendRefs:
+    - name: shop-api
+      port: 443
+      weight: 1
+  ```
+
+  **Remember:** the Route references the Service port, not the Pod's targetPort.
+
+  The Service might look like this:
+
+  ```yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: shop-api
+    namespace: api
+  spec:
+    selector:
+      app: shop-api
+    ports:
+      - name: https
+        protocol: TCP
+        port: 443
+        targetPort: 8443
+  ```
+
+  The application Pods must actually serve HTTPS on port `8443`.
+
+### Understand the important fields
+
+- **`targetRefs`**
+
+  ```yaml
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: shop-api
+  ```
+  
+  This identifies the Service to which the policy applies.
+  - `group: ""` → means the core Kubernetes API group.
+  - `kind: Service` → identifies the target resource type.
+  - `name: shop-api` → identifies the target Service.
+  
+  **Important:** The `BackendTLSPolicy` must be in the **same namespace as the Service it targets**. In our example, both are in `api`.
+
+  > **The policy is attached to the Service, not directly to the `HTTPRoute`.** This means multiple Routes that reference the same Service can use the same backend TLS configuration. 
+
+- **`validation.hostname`**
+
+  This field has two important purposes:
+
+  1. It specifies the SNI hostname the Gateway sends when establishing the TLS connection to the backend.
+  2. It is used to verify the backend's certificate identity.
+
+  For example, the backend certificate must be valid for `shop-api.internal.example.com`.
+
+  This hostname does not have to be the same as the public hostname used by clients:
+
+  - **`Client → Gateway`**: `shop.example.com`
+  - **`Gateway → Backend`**: `shop-api.internal.example.com`
+
+  This distinction is important in real environments because internal backend services often have their own DNS names and certificates.
+
+- **`caCertificateRefs`**
+
+  ```yaml
+  caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: shop-api-ca
+  ```
+
+  This tells the Gateway which CA certificate(s) to trust when verifying the backend's certificate.
+
+  The ConfigMap contains PEM-encoded CA certificate data.
+
+  The validation process is conceptually:
+  1. Gateway connects to the backend using TLS.
+  2. Backend presents its certificate.
+  3. Gateway verifies the certificate chain against the configured CA.
+  4. Gateway verifies the certificate identity against the configured hostname.
+  5. If validation succeeds, the TLS connection can be established.
+
+  If certificate verification fails, the Gateway must not treat that backend TLS connection as successfully established.
+
+### System CA certificates versus custom CA certificates
+
+There are two alternatives for configuring certificate trust.
+
+- **Option A — Custom CA certificates**
+
+  ```yaml
+  validation:
+    hostname: shop-api.internal.example.com
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: shop-api-ca
+  ```
+
+  Use this when your backend certificates are issued by an **internal CA** or a CA that is **not in the implementation's system trust store**.
+
+- **Option B — System CA certificates**
+
+  ```yaml
+  validation:
+    hostname: shop-api.example.com
+    wellKnownCACertificates: System
+  ```
+
+  This tells the Gateway implementation to use its **system trust store**.
+
+  Use it when the backend certificate is issued by a **publicly trusted CA** and the implementation supports this option.
+
+  You must specify one of these trust mechanisms, not both. 
+
+### Does BackendTLSPolicy provide mutual TLS (mTLS)?
+
+**No, not by itself.**
+
+The configuration we've used provides:
+- Encryption from Gateway to backend.
+- Verification of the backend's certificate by the Gateway.
+
+This is ordinary TLS with server authentication.
+
+In mutual TLS, the backend also verifies a client certificate presented by the Gateway.
+
+**Ordinary backend TLS:**
+
+```
+Gateway  ---- TLS ---->  Backend
+          verifies
+          backend cert
+```
+
+**Mutual TLS:**
+
+```
+Gateway  <--- TLS ---->  Backend
+          verifies       verifies
+          backend cert   gateway cert
+```
+
+`BackendTLSPolicy` has an Extended feature called `subjectAltNames` that can provide more precise backend certificate identity matching, including URI-based identities such as SPIFFE IDs. It does not, by itself, configure the Gateway's client certificate for mTLS. 
+
+### Important operational considerations
+
+A few things are easy to misunderstand:
+
+| Point | Explanation |
+| --- | --- |
+| Does it encrypt Gateway-to-backend traffic? | Yes, when supported and successfully configured. |
+| Does it issue backend certificates? | No. |
+| Does it configure the Gateway's frontend certificate? | No. |
+| Does it configure the backend application to serve HTTPS? | No. The backend must already support TLS. |
+| Does it configure backend certificate trust? | Yes. |
+| Does it automatically enable mTLS? | No. |
+| Does it apply to a Route or a Service? | It targets a Service. |
+| Can it reference a CA ConfigMap in another namespace? | No. |
+
+Also, don't confuse `BackendTLSPolicy` with `ReferenceGrant`. A `ReferenceGrant` is not needed for the CA `ConfigMap` in our example because the `ConfigMap` and policy are in the same namespace. Cross-namespace CA references are not permitted by this policy specification. 
+
+### Cilium implementation
+
+Cilium supports `BackendTLSPolicy` with its Gateway API implementation. Its documentation demonstrates the same workflow:
+
+1. Configure a backend application to serve TLS.
+2. Expose the backend's HTTPS port through a Kubernetes Service.
+3. Create a CA ConfigMap.
+4. Create a `BackendTLSPolicy` targeting the Service.
+5. Update the HTTPRoute backend port to the Service's HTTPS port.
+
+After applying the policy, inspect its status:
+
+```bash
+kubectl get backendtlspolicy -n api
+kubectl describe backendtlspolicy shop-api-backend-tls -n api
+kubectl get backendtlspolicy shop-api-backend-tls -n api -o yaml
+```
+
+Check its `status.ancestors[].conditions` to see whether the implementation accepted and successfully programmed the policy. Also test actual requests: an accepted policy alone does not prove the backend TLS handshake succeeds.
+
+### The most important takeaway
+
+Remember these three different responsibilities:
+
+| Resource / field | Responsibility |
+| --- | --- |
+| `Gateway.spec.listeners[].tls` | TLS between client and Gateway |
+| `HTTPRoute.spec.rules[].backendRefs` | Selects the backend Service and its Service port |
+| `BackendTLSPolicy` | Configures TLS and backend certificate validation between Gateway and backend |
+
+The complete architecture can therefore look like this:
+
+```
+Client
+  |
+  | HTTPS
+  | Certificate: shop.example.com
+  |
+  v
+Gateway / Envoy
+  |
+  | HTTPRoute selects shop-api:443
+  |
+  | HTTPS
+  | SNI: shop-api.internal.example.com
+  | Certificate verified using internal CA
+  |
+  v
+Backend Service
+  |
+  v
+Backend Pod
+```
 
 ---
