@@ -1,7 +1,4 @@
 
-
-
-
 # Cilium Gateway API Architecture
 
 When you create a Gateway and an HTTPRoute, Kubernetes stores those resources. They do not directly forward packets. Cilium's control-plane components interpret the resources, translate them into proxy configuration, and configure Envoy. Cilium's networking data plane then directs traffic to the proxy, and Envoy applies the HTTP routing rules.
