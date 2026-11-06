@@ -1,7 +1,7 @@
 
 # Cilium Gateway API Architecture
 
-When you create a Gateway and an HTTPRoute, Kubernetes stores those resources. They do not directly forward packets. Cilium's control-plane components interpret the resources, translate them into proxy configuration, and configure Envoy. Cilium's networking data plane then directs traffic to the proxy, and Envoy applies the HTTP routing rules.
+When you create a `Gateway` and an `HTTPRoute`, Kubernetes stores those resources. They do not directly forward packets. Cilium's control-plane components interpret the resources, translate them into proxy configuration, and configure Envoy. Cilium's networking data plane then directs traffic to the proxy, and Envoy applies the HTTP routing rules.
 
 Cilium's official documentation describes this flow as the Cilium operator validating Gateway API resources and translating them into Cilium Envoy Configuration resources, followed by the Cilium agent supplying the configuration to Envoy.
 
@@ -59,7 +59,6 @@ A resource's existence does not prove that its configuration has been accepted, 
 Consider a client requesting `https://shop.example.com/api/orders`.
 
 
-
 1. **External delivery:** DNS, routing, firewalls, and any external WAF or load balancer deliver traffic to the exposed Gateway endpoint.
 2. **Traffic steering:** Cilium networking directs the connection to Envoy. The exact path depends on the Gateway exposure mode.
 3. **TLS handling:** For an HTTPS listener using TLS termination, Envoy completes the TLS handshake and decrypts the HTTP request. With TLS passthrough, Envoy forwards the encrypted stream according to the supported TLS routing configuration instead.
@@ -70,7 +69,7 @@ Consider a client requesting `https://shop.example.com/api/orders`.
 
 The steps describe the logical processing flow; they do not necessarily correspond to separate physical network hops.
 
-## 4. eBPF, TPROXY, and Envoy
+## eBPF, TPROXY, and Envoy
 
 These technologies have different responsibilities.
 
@@ -88,7 +87,7 @@ Cilium's Gateway API implementation uses TPROXY to steer traffic to Envoy. In th
 
 Cilium Gateway API requires kube-proxy replacement (`kubeProxyReplacement=true`) and the L7 proxy (`l7Proxy=true`).
 
-## 5. Envoy Deployment Models
+## Envoy Deployment Models
 
 Cilium supports two Envoy deployment models:
 
@@ -99,7 +98,7 @@ In both models, Envoy handles the relevant Layer 7 traffic on the node. The depl
 
 Do not assume that every Gateway resource creates a dedicated Envoy Pod. Cilium's proxy infrastructure can handle configuration for multiple Gateway listeners and routes.
 
-## 6. Exposure and Traffic Redirection
+## Exposure and Traffic Redirection
 
 Cilium Gateway API commonly exposes its proxy through a `LoadBalancer` Service. Depending on the environment and configuration, NodePort or host-network exposure may be used instead.
 
@@ -109,7 +108,7 @@ With host-network exposure, Gateway listeners are exposed on selected node netwo
 
 Listener configuration alone does not guarantee external reachability. Routing, firewall rules, WAF or load-balancer configuration, and node availability must also be considered.
 
-## 7. Troubleshooting the Configuration Lifecycle
+## Troubleshooting the Configuration Lifecycle
 
 When Gateway traffic fails, check the following separately:
 
@@ -194,87 +193,87 @@ The intended traffic flow is:
 
 ## 1. Prerequisites and Enable Gateway API
 
-### 1.1 Verify Cilium
+- ### 1.1 Verify Cilium
 
-Check Cilium's status:
+  Check Cilium's status:
 
-```bash
-cilium status
-```
+  ```bash
+  cilium status
+  ```
 
-Inspect the installed Cilium version and Helm values:
+  Inspect the installed Cilium version and Helm values:
 
-```bash
-helm list -n kube-system
-helm get values cilium -n kube-system
-```
+  ```bash
+  helm list -n kube-system
+  helm get values cilium -n kube-system
+  ```
 
-The Helm release name may differ from `cilium` in your cluster.
+  The Helm release name may differ from `cilium` in your cluster.
 
-Cilium Gateway API requires kube-proxy replacement:
+  Cilium Gateway API requires kube-proxy replacement:
 
-```yaml
-kubeProxyReplacement: true
-```
+  ```yaml
+  kubeProxyReplacement: true
+  ```
 
-The L7 proxy must also be enabled:
+  The L7 proxy must also be enabled:
 
-```yaml
-l7Proxy: true
-```
+  ```yaml
+  l7Proxy: true
+  ```
 
-### 1.2 Install Gateway API Standard CRDs
+- ### 1.2 Install Gateway API Standard CRDs
 
-For the Cilium 1.20.4 example, install Gateway API v1.6.3 Standard CRDs:
+  For the Cilium 1.20.4 example, install Gateway API v1.6.3 Standard CRDs:
 
-```bash
-kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
+  ```bash
+  kubectl apply --server-side -f \
+    https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
 
-kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
+  kubectl apply --server-side -f \
+    https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
 
-kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
+  kubectl apply --server-side -f \
+    https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
 
-kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
-```
+  kubectl apply --server-side -f \
+    https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.6.3/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
+  ```
 
-These CRDs define the Kubernetes API types. Installing them does not install or enable the Cilium controller.
+  These CRDs define the Kubernetes API types. Installing them does not install or enable the Cilium controller.
 
-Verify that the resources are registered:
+  Verify that the resources are registered:
 
-```bash
-kubectl get crd gatewayclasses.gateway.networking.k8s.io
-kubectl get crd gateways.gateway.networking.k8s.io
-kubectl get crd httproutes.gateway.networking.k8s.io
-kubectl get crd referencegrants.gateway.networking.k8s.io
-```
+  ```bash
+  kubectl get crd gatewayclasses.gateway.networking.k8s.io
+  kubectl get crd gateways.gateway.networking.k8s.io
+  kubectl get crd httproutes.gateway.networking.k8s.io
+  kubectl get crd referencegrants.gateway.networking.k8s.io
+  ```
 
-### 1.3 Enable Cilium Gateway API Support
+- ### 1.3 Enable Cilium Gateway API Support
 
-If Gateway API support is not already enabled, update the existing Cilium Helm release. For example:
+  If Gateway API support is not already enabled, update the existing Cilium Helm release. For example:
 
-```bash
-helm upgrade cilium cilium/cilium \
-  --version 1.20.4 \
-  --namespace kube-system \
-  --reuse-values \
-  --set kubeProxyReplacement=true \
-  --set gatewayAPI.enabled=true
-```
+  ```bash
+  helm upgrade cilium cilium/cilium \
+    --version 1.20.4 \
+    --namespace kube-system \
+    --reuse-values \
+    --set kubeProxyReplacement=true \
+    --set gatewayAPI.enabled=true
+  ```
 
-Use the repository, chart version, and release name appropriate to your installation. Do not blindly apply this example to a cluster running another Cilium release.
+  Use the repository, chart version, and release name appropriate to your installation. Do not blindly apply this example to a cluster running another Cilium release.
 
-Verify the result:
+  Verify the result:
 
-```bash
-cilium status
-kubectl get pods -n kube-system
-```
+  ```bash
+  cilium status
+  kubectl get pods -n kube-system
+  ```
 
-Cilium's Gateway API implementation uses Envoy for Layer 7 proxying. In the default TPROXY configuration, the nodes must have the required iptables and netfilter support.
+  Cilium's Gateway API implementation uses Envoy for Layer 7 proxying. In the default TPROXY configuration, the nodes must have the required iptables and netfilter support.
 
 ---
 
@@ -834,7 +833,7 @@ kubectl apply -f http-route.yaml
 
 `RequestHeaderModifier` and `URLRewrite` are standard Gateway API filters, but implementation support must always be checked for the chosen controller and version.
 
-## 8. Verify the Gateway and NodePort
+## 9. Verify the Gateway and NodePort
 
 First, inspect the Gateway and Route status:
 
