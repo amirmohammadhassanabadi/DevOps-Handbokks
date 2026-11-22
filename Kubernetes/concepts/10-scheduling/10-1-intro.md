@@ -68,43 +68,43 @@ Pod assigned to the selected node
 Kubelet starts the Pod
 ```
 
-### 1. Filtering
+- ### Filtering
 
-The scheduler evaluates nodes and eliminates those that do not satisfy the Pod's scheduling requirements.
+    The scheduler evaluates nodes and eliminates those that do not satisfy the Pod's scheduling requirements.
 
-Examples:
+    Examples:
 
-- Insufficient available CPU or memory for the Pod's requests.
-- Node does not match `nodeSelector`.
-- Required node affinity is not satisfied.
-- A node has an untolerated `NoSchedule` taint.
-- Required Pod affinity or anti-affinity rules are not satisfied.
+    - Insufficient available CPU or memory for the Pod's requests.
+    - Node does not match `nodeSelector`.
+    - Required node affinity is not satisfied.
+    - A node has an untolerated `NoSchedule` taint.
+    - Required Pod affinity or anti-affinity rules are not satisfied.
 
-The remaining nodes are considered eligible for the Pod.
+    The remaining nodes are considered eligible for the Pod.
 
-If no node passes the filtering stage, the Pod remains `Pending`.
+    If no node passes the filtering stage, the Pod remains `Pending`.
 
-### 2. Scoring
+- ### Scoring
 
-The scheduler scores the eligible nodes using its scheduling plugins and configured policies.
+    The scheduler scores the eligible nodes using its scheduling plugins and configured policies.
 
-For example:
+    For example:
 
-- A node may receive a higher score because it matches a preferred node-affinity rule.
-- A node may be preferred because of resource distribution.
-- A node may be preferred because it satisfies topology-related preferences.
+    - A node may receive a higher score because it matches a preferred node-affinity rule.
+    - A node may be preferred because of resource distribution.
+    - A node may be preferred because it satisfies topology-related preferences.
 
-The scheduler selects a node based on the resulting scores.
+    The scheduler selects a node based on the resulting scores.
 
-Soft scheduling preferences influence this stage, but they do not guarantee placement.
+    Soft scheduling preferences influence this stage, but they do not guarantee placement.
 
-### 3. Binding
+- ### Binding
 
-After selecting a node, the scheduler binds the Pod to it by assigning the node name.
+    After selecting a node, the scheduler binds the Pod to it by assigning the node name.
 
-The kubelet on that node then observes the assigned Pod and attempts to run it.
+    The kubelet on that node then observes the assigned Pod and attempts to run it.
 
-**Important:** The scheduler does not start containers itself. Its responsibility is to select and assign a node.
+    **Important:** The scheduler does not start containers itself. Its responsibility is to select and assign a node.
 
 ---
 
@@ -112,30 +112,30 @@ The kubelet on that node then observes the assigned Pod and attempts to run it.
 
 Kubernetes scheduling rules can express either mandatory requirements or preferences.
 
-### Hard Constraints
+- ### Hard Constraints
 
-A hard constraint must be satisfied for a node to be considered eligible.
+    A hard constraint must be satisfied for a node to be considered eligible.
 
-If no node satisfies the requirement, the Pod cannot be scheduled.
+    If no node satisfies the requirement, the Pod cannot be scheduled.
 
-Examples:
+    Examples:
 
-- `nodeSelector`
-- `requiredDuringSchedulingIgnoredDuringExecution` in node affinity
-- `requiredDuringSchedulingIgnoredDuringExecution` in Pod affinity or anti-affinity
+    - `nodeSelector`
+    - `requiredDuringSchedulingIgnoredDuringExecution` in node affinity
+    - `requiredDuringSchedulingIgnoredDuringExecution` in Pod affinity or anti-affinity
 
-### Soft Preferences
+- ### Soft Preferences
 
-A soft preference tells the scheduler which nodes are preferable, but does not make matching nodes mandatory.
+    A soft preference tells the scheduler which nodes are preferable, but does not make matching nodes mandatory.
 
-If no node satisfies the preference, the scheduler can still select another eligible node.
+    If no node satisfies the preference, the scheduler can still select another eligible node.
 
-Examples:
+    Examples:
 
-- `preferredDuringSchedulingIgnoredDuringExecution` in node affinity
-- `preferredDuringSchedulingIgnoredDuringExecution` in Pod affinity or anti-affinity
+    - `preferredDuringSchedulingIgnoredDuringExecution` in node affinity
+    - `preferredDuringSchedulingIgnoredDuringExecution` in Pod affinity or anti-affinity
 
-Conceptually:
+**Conceptually:**
 
 | Hard constraint | Soft preference |
 |---|---|
