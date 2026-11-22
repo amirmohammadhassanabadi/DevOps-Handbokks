@@ -1,6 +1,4 @@
-# Pod Affinity and Pod Anti-Affinity
-
-## 4. Pod Affinity
+# Pod Affinity
 
 Node affinity selects nodes based on **node labels**.
 
@@ -54,7 +52,7 @@ Because `topologyKey` is `kubernetes.io/hostname`, the topology domain represent
 
 ---
 
-## 5. Pod Anti-Affinity
+# Pod Anti-Affinity
 
 Pod anti-affinity tells the scheduler:
 
@@ -85,7 +83,7 @@ Meaning:
 
 This is useful for improving availability by preventing replicas from sharing the same node.
 
-### Hard and Soft Pod Affinity Rules
+## Hard and Soft Pod Affinity Rules
 
 Pod affinity and anti-affinity support both hard requirements and soft preferences.
 
@@ -94,49 +92,49 @@ Pod affinity and anti-affinity support both hard requirements and soft preferenc
 | `requiredDuringSchedulingIgnoredDuringExecution` | Matching is mandatory. |
 | `preferredDuringSchedulingIgnoredDuringExecution` | Matching is preferred but not mandatory. |
 
-### Soft Pod Affinity Example
+- ### Soft Pod Affinity Example
 
-Prefer scheduling frontend Pods on the same nodes as backend Pods:
+    Prefer scheduling frontend Pods on the same nodes as backend Pods:
 
-```yaml
-spec:
-  affinity:
-    podAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 70
-          podAffinityTerm:
-            labelSelector:
-              matchLabels:
-                app: backend
-            topologyKey: kubernetes.io/hostname
-```
+    ```yaml
+    spec:
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 70
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend
+                topologyKey: kubernetes.io/hostname
+    ```
 
-The scheduler prefers nodes in the same topology domain as matching backend Pods, but can select other eligible nodes.
+    The scheduler prefers nodes in the same topology domain as matching backend Pods, but can select other eligible nodes.
 
-### Soft Pod Anti-Affinity Example
+- ### Soft Pod Anti-Affinity Example
 
-Prefer spreading database Pods across availability zones:
+    Prefer spreading database Pods across availability zones:
 
-```yaml
-spec:
-  affinity:
-    podAntiAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchLabels:
-                app: database
-            topologyKey: topology.kubernetes.io/zone
-```
+    ```yaml
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: database
+                topologyKey: topology.kubernetes.io/zone
+    ```
 
-This expresses a preference for placing the new Pod in a zone that does not already contain matching database Pods.
+    This expresses a preference for placing the new Pod in a zone that does not already contain matching database Pods.
 
-It does not guarantee that every replica will be in a different zone.
+    It does not guarantee that every replica will be in a different zone.
 
 ---
 
-## 6. topologyKey
+## topologyKey
 
 `topologyKey` defines the node-label key used to identify topology domains for Pod affinity and anti-affinity.
 
