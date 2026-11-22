@@ -37,39 +37,39 @@ This means the node has a taint with:
 
 ---
 
-## 9. Taint Effects
+## Taint Effects
 
 Kubernetes supports three main taint effects.
 
-### A. NoSchedule
+- ### NoSchedule
 
-New Pods that do not tolerate the taint will not be scheduled on the node.
+  New Pods that do not tolerate the taint will not be scheduled on the node.
 
-Existing Pods are not automatically evicted merely because this taint is added.
+  Existing Pods are not automatically evicted merely because this taint is added.
 
-Example:
+  Example:
 
-```bash
-kubectl taint node node1 dedicated=db:NoSchedule
-```
+  ```bash
+  kubectl taint node node1 dedicated=db:NoSchedule
+  ```
 
-The node now repels new Pods unless they have a matching toleration.
+  The node now repels new Pods unless they have a matching toleration.
 
-### B. PreferNoSchedule
+- ### PreferNoSchedule
 
-The scheduler tries to avoid placing Pods on the node unless other scheduling considerations make it appropriate.
+  The scheduler tries to avoid placing Pods on the node unless other scheduling considerations make it appropriate.
 
-This is a soft restriction, not a guarantee that Pods will avoid the node.
+  This is a soft restriction, not a guarantee that Pods will avoid the node.
 
-### C. NoExecute
+- ### NoExecute
 
-This effect applies to both new and existing Pods.
+  This effect applies to both new and existing Pods.
 
-- New Pods without a matching toleration cannot be scheduled on the node.
-- Existing Pods without a matching toleration are evicted.
-- Existing Pods with a matching toleration can remain on the node.
+  - New Pods without a matching toleration cannot be scheduled on the node.
+  - Existing Pods without a matching toleration are evicted.
+  - Existing Pods with a matching toleration can remain on the node.
 
-This is the strongest taint effect.
+  This is the strongest taint effect.
 
 ### Taint Effect Summary
 
@@ -81,7 +81,7 @@ This is the strongest taint effect.
 
 ---
 
-## 10. Tolerations
+# Tolerations
 
 A toleration is configured in the Pod specification.
 
@@ -125,7 +125,7 @@ This tolerates `NoSchedule` taints with the key `dedicated`, regardless of their
 
 An empty key combined with `Exists` can match all taint keys for the specified effect.
 
-### Complete Example
+## Complete Example
 
 First, taint the node:
 
@@ -156,19 +156,15 @@ This Pod is allowed to run on `node1`.
 
 Without the toleration, the scheduler will not select that node.
 
-### Important: Toleration Does Not Force Scheduling
-
-A toleration only removes the restriction imposed by a matching taint.
-
-It does not tell the scheduler that the Pod must run on that node.
-
-For example, if a Pod tolerates a GPU node's taint, the scheduler may still select another eligible node.
-
-To target a specific node group, combine tolerations with `nodeSelector` or node affinity.
+> ### Important: Toleration Does Not Force Scheduling. A toleration only removes the restriction imposed by a matching taint.
+>
+> It does not tell the scheduler that the Pod must run on that node.
+>
+> For example, if a Pod tolerates a GPU node's taint, the scheduler may still select another eligible node. To target a specific node group, combine tolerations with `nodeSelector` or node affinity.
 
 ---
 
-## 11. NoExecute and tolerationSeconds
+## `NoExecute` and `tolerationSeconds`
 
 `NoExecute` has an additional field called `tolerationSeconds`.
 
@@ -202,81 +198,81 @@ This is particularly useful for handling temporary node problems.
 
 ---
 
-## 12. Practical Uses of Taints and Tolerations
+## Practical Uses of Taints and Tolerations
 
-### A. Dedicated Nodes
+- ### Dedicated Nodes
 
-Suppose you have dedicated nodes for database workloads.
+  Suppose you have dedicated nodes for database workloads.
 
-Apply a taint:
+  Apply a taint:
 
-```bash
-kubectl taint node worker-1 dedicated=db:NoSchedule
-```
+  ```bash
+  kubectl taint node worker-1 dedicated=db:NoSchedule
+  ```
 
-Configure database Pods with:
+  Configure database Pods with:
 
-```yaml
-tolerations:
-  - key: "dedicated"
-    operator: "Equal"
-    value: "db"
-    effect: "NoSchedule"
-```
+  ```yaml
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "db"
+      effect: "NoSchedule"
+  ```
 
-This allows database Pods to use the node.
+  This allows database Pods to use the node.
 
-For actual workload isolation, combine the toleration with node affinity or `nodeSelector`. Otherwise, tolerated database Pods are allowed on the node but are not required to use it.
+  For actual workload isolation, combine the toleration with node affinity or `nodeSelector`. Otherwise, tolerated database Pods are allowed on the node but are not required to use it.
 
-### B. Control-Plane Nodes
+- ### Control-Plane Nodes
 
-Kubernetes clusters commonly taint control-plane nodes with:
+  Kubernetes clusters commonly taint control-plane nodes with:
 
-```text
-node-role.kubernetes.io/control-plane:NoSchedule
-```
+  ```text
+  node-role.kubernetes.io/control-plane:NoSchedule
+  ```
 
-This prevents ordinary Pods without a matching toleration from being scheduled there.
+  This prevents ordinary Pods without a matching toleration from being scheduled there.
 
-Some cluster distributions or configurations use different taints, or may not apply this taint at all.
+  Some cluster distributions or configurations use different taints, or may not apply this taint at all.
 
-### C. GPU Nodes
+- ### GPU Nodes
 
-A GPU node might have a taint such as:
+  A GPU node might have a taint such as:
 
-```text
-nvidia.com/gpu=true:NoSchedule
-```
+  ```text
+  nvidia.com/gpu=true:NoSchedule
+  ```
 
-A workload needs a matching toleration to pass the taint restriction.
+  A workload needs a matching toleration to pass the taint restriction.
 
-However, toleration alone does not allocate a GPU.
+  However, toleration alone does not allocate a GPU.
 
-A GPU workload must also request the appropriate extended resource, for example:
+  A GPU workload must also request the appropriate extended resource, for example:
 
-```yaml
-resources:
-  limits:
-    nvidia.com/gpu: 1
-```
+  ```yaml
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+  ```
 
-The scheduler uses the resource request to determine whether the node has an available GPU resource.
+  The scheduler uses the resource request to determine whether the node has an available GPU resource.
 
-### D. Node Maintenance
+- ### Node Maintenance
 
-You can apply a `NoExecute` taint to evict Pods that do not tolerate it:
+  You can apply a `NoExecute` taint to evict Pods that do not tolerate it:
 
-```bash
-kubectl taint node node1 maintenance=true:NoExecute
-```
+  ```bash
+  kubectl taint node node1 maintenance=true:NoExecute
+  ```
 
-Pods without a matching toleration will be evicted.
+  Pods without a matching toleration will be evicted.
 
-For ordinary planned maintenance, `kubectl drain` is generally the more appropriate administrative operation because it coordinates Pod eviction and respects mechanisms such as PodDisruptionBudgets.
+  For ordinary planned maintenance, `kubectl drain` is generally the more appropriate administrative operation because it coordinates Pod eviction and respects mechanisms such as `PodDisruptionBudgets`.
 
 ---
 
-## 13. Inspecting and Managing Node Taints
+## Inspecting and Managing Node Taints
 
 Use:
 
@@ -338,21 +334,21 @@ These mechanisms serve different purposes.
 
 Think of each node as a room.
 
-**Taint:**
+- **Taint:**
 
-> This room is restricted. You need permission to enter.
+  > This room is restricted. You need permission to enter.
 
-**Toleration:**
+- **Toleration:**
 
-> This Pod has permission to enter the restricted room.
+  > This Pod has permission to enter the restricted room.
 
-**Affinity:**
+- **Affinity:**
 
-> This Pod wants to be in a particular room or topology domain.
+  > This Pod wants to be in a particular room or topology domain.
 
-**Anti-affinity:**
+- **Anti-affinity:**
 
-> This Pod wants to avoid a particular room or topology domain.
+  > This Pod wants to avoid a particular room or topology domain.
 
 The important distinction is:
 
@@ -427,43 +423,13 @@ When the node recovers and reports healthy status again, Kubernetes can remove t
 
 Kubernetes commonly injects default tolerations for `node.kubernetes.io/not-ready` and `node.kubernetes.io/unreachable` into Pods.
 
-These normally have a `tolerationSeconds` value of 300 seconds.
+These normally have a `tolerationSeconds` value of **300 seconds**.
 
 This means a Pod can tolerate these node conditions for a limited period before eviction, unless its configuration specifies different tolerations.
 
 This behavior is important because a temporary network interruption does not necessarily cause immediate eviction of every Pod on the affected node.
 
 **Important:** Node health detection and Pod eviction are separate processes. A node becoming unreachable does not mean every Pod is immediately terminated or that its application process has definitely stopped.
-
----
-
-# Resource Requests and Scheduling
-
-CPU and memory resource requests are important inputs to scheduling decisions.
-
-When a Pod is scheduled, the scheduler checks whether the node has sufficient allocatable resources for the Pod's requests.
-
-Example:
-
-```yaml
-resources:
-  requests:
-    cpu: "500m"
-    memory: "512Mi"
-  limits:
-    cpu: "1"
-    memory: "1Gi"
-```
-
-In this example:
-
-- The Pod requests 500 millicores of CPU.
-- The Pod requests 512 MiB of memory.
-- The CPU and memory limits define runtime resource limits.
-
-**Important distinction:** The scheduler primarily uses resource requests when determining whether a node can accommodate a Pod. Resource limits do not directly determine whether a node has enough capacity for scheduling.
-
-A Pod can remain Pending if no node has sufficient available allocatable CPU or memory for its requests, even if the node appears to have low actual resource usage.
 
 ---
 

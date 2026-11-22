@@ -108,6 +108,36 @@ Kubelet starts the Pod
 
 ---
 
+## Resource Requests and Scheduling
+
+CPU and memory resource requests are important inputs to scheduling decisions.
+
+When a Pod is scheduled, the scheduler checks whether the node has sufficient allocatable resources for the Pod's requests.
+
+Example:
+
+```yaml
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+```
+
+In this example:
+
+- The Pod requests 500 millicores of CPU.
+- The Pod requests 512 MiB of memory.
+- The CPU and memory limits define runtime resource limits.
+
+**Important distinction:** The scheduler primarily uses resource requests when determining whether a node can accommodate a Pod. Resource limits do not directly determine whether a node has enough capacity for scheduling.
+
+A Pod can remain Pending if no node has sufficient available allocatable CPU or memory for its requests, even if the node appears to have low actual resource usage.
+
+---
+
 ## Hard Constraints vs Soft Preferences
 
 Kubernetes scheduling rules can express either mandatory requirements or preferences.
