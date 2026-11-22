@@ -1,7 +1,3 @@
-# Taints and Tolerations
-
-## 8. Introduction
-
 Taints and tolerations control which Pods are allowed to be scheduled on particular nodes.
 
 They work together:
